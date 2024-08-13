@@ -1,0 +1,30 @@
+-rw-r--r--   1 madore   ftp           188 Oct 27 21:34 Hello.unl
+	Written by Panu Kalliokoski <Panu.Kalliokoski@nokia.com>
+	Write ``Hello world!'' ten times.
+-rw-r--r--   1 madore   ftp           553 Oct 27 21:34 Square.unl
+	Written by Panu Kalliokoski <Panu.Kalliokoski@nokia.com>
+	Display the squares of the integers up to 9, as squares of asterisks.
+-rw-r--r--   1 madore   ftp           611 Oct 27 21:32 count.unl
+	Written by David Madore <david.madore@ens.fr>
+	Display the integers consecutively, as a pyramid of asterisks.
+-rw-r--r--   1 madore   ftp           219 Oct 27 21:32 count2.unl
+	Written by David Madore <david.madore@ens.fr>
+	Same as count.unl but much shorter (and harder to understand).
+-rw-rw-r--   1 david    david        3447 Nov  7 01:16 fibo.unl
+	Written by David Madore <david.madore@ens.fr>
+	Prints the Fibonacci numbers as lines of asterisks.
+-rw-rw-r--   1 david    david        2049 Nov  7 01:57 pattern.unl
+	Written by David Madore <david.madore@ens.fr>
+	Produces a ``golden'' pattern of stars.
+-rw-r--r--   1 madore   ftp           902 Oct 27 21:32 powers2.unl
+	Written by David Madore <david.madore@ens.fr>
+	Display the powers of two (as lines of asterisks).
+-rw-r--r--   1 madore   ftp            94 Oct 27 21:34 trivial.unl
+	Written by David Madore <david.madore@ens.fr>
+	Loop displaying a string.
+-rw-r--r--   1 madore   ftp            96 Oct 27 21:34 trivial2.unl
+	Written by David Madore <david.madore@ens.fr>
+	Same as trivial.unl but use call/cc.
+-rw-r--r--   1 madore   ftp           190 Oct 27 21:34 trivial3.unl
+	Written by David Madore <david.madore@ens.fr>
+	Same as trivial.unl but avoid use of delay.

@@ -5,3 +5,4 @@ atomic = { "i" | "s" | "k" | "v" | "d" | "c" | "r" }
 putchar = @{ "." ~ ANY }
 
 WHITESPACE = _{ " " | NEWLINE }
+COMMENT    = _{ "#" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }

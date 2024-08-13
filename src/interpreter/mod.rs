@@ -92,10 +92,11 @@ pub enum Value {
     D0,
     C0,
     Put0(char),
-    S1(Box<Term>),
-    S2(Box<Term>, Box<Term>),
+    S1(Box<Value>),
+    S2(Box<Value>, Box<Value>),
     K1(Box<Value>),
-    D1(Box<Term>),
+    D1T(Box<Term>),
+    D1V(Box<Value>),
     C1(Box<Option<Kont>>),
 }
 
@@ -115,16 +116,15 @@ impl Display for Value {
                     write!(f, ".{}", c)
                 }
             }
-            Value::S1(w) => write!(f, "`s[{}]", w),
-            Value::S2(w0, w1) => write!(f, "``s[{}][{}]", w0, w1),
+            Value::S1(w) => write!(f, "`s{}", w),
+            Value::S2(w0, w1) => write!(f, "``s{}{}", w0, w1),
             Value::K1(w) => write!(f, "`k{}", w),
-            Value::D1(t) => write!(f, "`d[{}]", t),
-            Value::C1(k) => {
-                match k.as_ref() {
-                    Some(k) => write!(f, "`c({})", k),
-                    None => write!(f, "`c()"),
-                }
-            }
+            Value::D1T(t) => write!(f, "`d[{}]", t),
+            Value::D1V(t) => write!(f, "`d{}", t),
+            Value::C1(k) => match k.as_ref() {
+                Some(k) => write!(f, "`c({})", k),
+                None => write!(f, "`c()"),
+            },
         }
     }
 }
@@ -134,7 +134,7 @@ pub enum Kont {
     BindT(Box<Term>, Box<Option<Kont>>),
     BindV(Box<Value>, Box<Option<Kont>>),
     BindW(Box<Value>, Box<Option<Kont>>),
-    S2(Box<Term>, Box<Term>, Box<Option<Kont>>),
+    S2(Box<Value>, Box<Value>, Box<Option<Kont>>),
     S1(Box<Value>, Box<Option<Kont>>),
 }
 impl Display for Kont {
@@ -242,14 +242,7 @@ fn eval(t: Term, k: Option<Kont>) -> State {
 
 fn apply_t(v: Value, t: Term, k: Option<Kont>) -> State {
     match v {
-        Value::D0 => State::ApplyKont(k, Value::D1(Box::new(t))),
-        Value::S0 => State::ApplyKont(k, Value::S1(Box::new(t))),
-        Value::S1(t0) => State::ApplyKont(k, Value::S2(t0, Box::new(t))),
-        Value::S2(t0, t1) => {
-            // This copys the third term. Very inefficient, but sharing requires pesky lifetime annotations.
-            // TODO: use a flat AST and convert all Boxes to references
-            State::Eval(Term::App(t0, Box::new(t.clone())), Some(Kont::S2(t1, Box::new(t), Box::new(k))))
-        }
+        Value::D0 => State::ApplyKont(k, Value::D1T(Box::new(t))),
         _ => State::Eval(t, Some(Kont::BindV(Box::new(v), Box::new(k)))),
     }
 }
@@ -267,11 +260,16 @@ fn apply_v(v: Value, w: Value, k: Option<Kont>) -> State {
         Value::V0 => State::ApplyKont(k, Value::V0),
         Value::C0 => State::ApplyV(w, Value::C1(Box::new(k.clone())), k),
         Value::C1(k1) => State::ApplyKont(*k1, w),
-        Value::D1(t0) => State::Eval(*t0, Some(Kont::BindW(Box::new(w), Box::new(k)))),
-        Value::D0 => unreachable!(),
-        Value::S0 => unreachable!(),
-        Value::S1(_) => unreachable!(),
-        Value::S2(_, _) => unreachable!(),
+        Value::D0 => State::ApplyKont(k, Value::D1V(Box::new(w))),
+        Value::D1T(t0) => State::Eval(*t0, Some(Kont::BindW(Box::new(w), Box::new(k)))),
+        Value::D1V(v0) => State::ApplyV(*v0, w, k),
+        Value::S0 => State::ApplyKont(k, Value::S1(Box::new(w))),
+        Value::S1(v0) => State::ApplyKont(k, Value::S2(v0, Box::new(w))),
+        Value::S2(v0, v1) => {
+            // This copys the third value. Very inefficient, but sharing requires pesky lifetime annotations.
+            // TODO: make a flat list or something?
+            State::ApplyV(*v0, w.clone(), Some(Kont::S2(v1, Box::new(w), Box::new(k))))
+        }
     }
 }
 
@@ -280,7 +278,7 @@ fn apply_kont(k: Kont, w: Value) -> State {
         Kont::BindT(t, k) => State::ApplyT(w, *t, *k),
         Kont::BindV(v, k) => State::ApplyV(*v, w, *k),
         Kont::BindW(w1, k) => State::ApplyV(w, *w1, *k),
-        Kont::S2(t1, t, k) => State::Eval(Term::App(t1, t), Some(Kont::S1(Box::new(w), k))),
+        Kont::S2(v1, v, k) => State::ApplyV(*v1, *v, Some(Kont::S1(Box::new(w), k))),
         Kont::S1(l, k) => State::ApplyV(*l, w, *k),
     }
 }

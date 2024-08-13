@@ -6,40 +6,30 @@ We represent unlambda terms as atoms. The only operator is `:app`. The functions
 
 ```elixir
 defmodule Eval1 do
-  def eval(:i), do: {:i}
-  def eval(:s), do: {:s}
-  def eval(:k), do: {:k}
-  def eval(:v), do: {:v}
-  def eval(:d), do: {:d}
-  # def eval(:c), do: {:c}   # after the CPS transform
-
+  
   def eval({:app, t0, t1}) do
     v = eval(t0)
     case v do
       {:d} -> {:d, t1}
       {:d, t0} -> eval({:app, t0, t1})
-      _ ->
-        w = eval(t1)
-        case v do
-          {:i} -> w
-          {:s} -> {:s, w}
-          {:s, w0} -> {:s, w0, w}
-          {:s, w0, w1} -> throw("unimplemented")
-          # apply the values together, like eval({:app, {:app, w0, w}, {:app, w1, w}})
-          {:k} -> {:k, w}
-          {:k, w} -> w
-          {:v} -> {:v}
-        end
+      {:i} -> eval(t1)
+      {:s} -> {:s, eval(t1)}
+      {:s, v0} -> {:s, v0, eval(t1)}
+      {:s, v0, v1} -> eval({:app, {:app, t0, t1}, {:app, t00, t1}})
+      {:k} -> {:k, eval(t1)}
+      {:k, t} -> t
+      {:v} -> {:v}
     end
   end
-
+  def eval(x), do: x
+  
   def main(t), do: eval(t)
 end
 ```
 
 ```elixir
-k = :k
-i = :i
+k = {:k}
+i = {:i}
 Eval1.main({:app, {:app, k, i}, k})
 ```
 
@@ -47,52 +37,30 @@ Yeah, it works. Note that it is almost an abstract machine now! Then CPS transfo
 
 ```elixir
 defmodule Eval2 do
-  def eval(:i, k), do: k.({:i})
-  def eval(:s, k), do: k.({:s})
-  def eval(:k, k), do: k.({:k})
-  def eval(:v, k), do: k.({:v})
-  def eval(:d, k), do: k.({:d})
-  def eval(:c, k), do: k.({:c})   # added after the CPS transform
-  def eval({:put, c}, k) do
-    IO.puts(c)
-    k.({:i})
-  end
-
+  
   def eval({:app, t0, t1}, k) do
     eval(t0, fn v ->
       case v do
         {:d} -> k.({:d, t1})
+        {:d, t0} -> eval({:app, t0, t1}, k)
+        {:i} -> eval(t1, k)
         {:s} -> k.({:s, t1})
-        {:s, st0} -> k.({:s, st0, t1})
-        {:s, st0, st1} -> 
-          eval({:app, st0, t1}, fn w0 -> 
-            eval({:app, st1, t1}, fn w1 -> 
-              app(w0, w1, k)
-            end)
-          end)
-        _ -> eval(t1, fn w -> app(v, w, k) end)
-      end
+        {:s, t0} -> k.({:s, t0, t1})
+        {:s, t0, t00} -> eval({:app, {:app, t0, t1}, {:app, t00, t1}}, k)
+        {:k} -> k.({:k, v})
+        {:k, t} -> eval(t, k)
+        {:v} -> k.({:v})
+      end  
     end)
   end
+  def eval(x, k), do: k.(x)
   
-  def app(v, w, k) do
-    case v do
-      {:i} -> k.(w)
-      {:k} -> k.({:k, w})
-      {:k, w} -> k.(w)
-      {:v} -> k.({:v})
-      {:c} -> app(w, {:c, k}, k)
-      {:c, k1} -> k1.(w)
-      {:d, t0} -> eval(t0, fn w0 -> app(w0, w, k) end)
-    end
-  end
-  
-  def main(t), do: eval(t, fn k -> k end)
+  def main(t), do: eval(t, fn x -> x end)
 end
 ```
 
 ```elixir
-Eval2.main({:app, {:app, {:app, :s, :d}, {:app, :k, :k}}, :i})
+Eval2.main({:app, {:app, {:app, {:s}, {:d}}, {:app, {:k}, {:k}}}, {:i}})
 ```
 
 Now defunctionalize the kontinuations.
@@ -165,62 +133,147 @@ After currying, the eval function returns a function that accepts a kontinution.
 
 ```elixir
 defmodule Eval4 do
-  def eval(:i), do: fn k -> applyK(k, {:i}) end
-  def eval(:s), do: fn k -> applyK(k, {:s}) end
-  def eval(:k), do: fn k -> applyK(k, {:k}) end
-  def eval(:v), do: fn k -> applyK(k, {:v}) end
-  def eval(:d), do: fn k -> applyK(k, {:d}) end
-  def eval(:c), do: fn k -> applyK(k, {:c}) end
-  def eval({:put, c}), do: fn k -> applyK(k, {:put, c}) end
+  def eval(:i), do: applyK({:i})
+  def eval(:s), do: applyK({:s}) 
+  def eval(:k), do: applyK({:k}) 
+  def eval(:v), do: applyK({:v}) 
+  def eval(:d), do: applyK({:d})
+  def eval(:c), do: applyK({:c})
+  def eval({:put, c}), do: applyK({:put, c}) 
 
   def eval({:app, t0, t1}) do
     fn k ->
       eval(t0).({:bindT, t1, k})
     end
   end
-
-  def applyT(v) do
-    fn(t, k) ->
-      case v do
-        {:d} -> applyK(k, {:d, t})
-        _ -> eval(t).({:bindV, v, k})
-      end
+  def applyT(v, t, k) do
+    case v do
+      {:d} -> applyK({:d, t}).(k)
+      {:s} -> applyK({:s, {:recur, eval(t)}}).(k)
+      {:s, {:recur, c0}} -> applyK({:s, {:recur, c0}, {:recur, eval(t)}}).(k)
+      {:s, {:recur, c0}, {:recur, c1}} -> c0.({:bindT, t, {:s2, {:recur, c1}, t, k}})
+      _ -> eval(t).({:bindV, v, k})
     end
   end
   
-  def applyV(v) do
-    fn(w, k) ->
-      case v do
-        {:i} -> applyK(k, w)
-        {:put, c} -> 
-          IO.inspect(c)
-          applyK(k, w)
-        {:s} -> applyK(k, {:s, w})
-        {:s, w0} -> applyK(k, {:s, w0, w})
-        {:s, w0, w1} -> applyV(w0).(w, {:s2, w1, w, k})
-        {:k} -> applyK(k, {:k, w})
-        {:k, w} -> applyK(k, w)
-        {:v} -> applyK(k, {:v})
-        {:c} -> applyV(w).({:c, k}, k)
-        {:c, k1} -> applyK(k1, w)
-        {:d, t0} -> eval(t0).({:bindW, w, k})
-      end
+  def applyV(v, w, k) do
+    case v do
+      {:i} -> applyK(w).(k)
+      {:put, c} -> 
+        IO.inspect(c)
+        applyK(w).(k)
+      {:k} -> applyK({:k, w}).(k)
+      {:k, w} -> applyK(w).(k)
+      {:v} -> applyK({:v}).(k)
+      {:c} -> applyV(w, {:c, k}, k)
+      {:c, k1} -> applyK(w).(k1)
+      {:d, t0} -> eval(t0).({:bindW, w, k})
     end
   end
 
-  def applyK(:return, v), do: v
-  def applyK({:bindT, t, k}, v), do: applyT(v).(t, k)
-  def applyK({:bindV, v, k}, w), do: applyV(v).(w, k)
-  def applyK({:bindW, w, k}, v), do: applyV(v).(w, k)
-  # potentially parallel! but doing this requires two kontinuation stacks.
-  # fibers!
-  def applyK({:s2, w1, w, k}, l), do: applyV(w1).(w, {:s1, l, k}) 
-  def applyK({:s1, l, k}, r), do: applyV(l).(r, k)
+  def applyK(v) do
+    fn k -> applyK1(k, v) end
+  end
+
+  def applyK1(:return, v), do: v
+  def applyK1({:bindT, t, k}, v), do: applyT(v, t, k)
+  def applyK1({:bindV, v, k}, w), do: applyV(v, w, k)
+  def applyK1({:bindW, w, k}, v), do: applyV(v, w, k)
+  def applyK1({:s2, {:recur, c1}, t, k}, v), do: c1.({:bindT, t, {:s1, v, k}}) 
+  def applyK1({:s1, v, k}, w), do: applyV(v, w, k)
   
   def main(t), do: eval(t).(:return)
 end
 ```
 
 ```elixir
-Eval3.main({:app, {:app, {:app, :s, :d}, {:app, :c, :k}}, :i})
+Eval4.main({:app, {:app, {:app, :s, :d}, {:app, :c, :k}}, :i})
+```
+
+After this, we can extract all functions
+
+```elixir
+# defmodule Ops do
+ 
+#   def value({:going, k}) do
+#     applyK(k, )
+#   end
+#   def value({:done}), do: {:done}
+# end
+
+defmodule Eval5 do
+
+  defmodule Ops do
+    def lift(f) do
+      fn x -> 
+        case x do
+          {:going, x} -> f.(x)
+          {:done} -> {:done}
+        end
+      end
+    end
+    
+    def combine(f, g) do
+      fn x -> g.(f.(x)) end
+    end
+    
+    def push(t1) do
+      lift(fn k -> {:going, {:bindT, t1, k}} end)
+    end
+  end
+  
+  def eval(:i), do: applyK({:i})
+  def eval(:s), do: applyK({:s}) 
+  def eval(:k), do: applyK({:k}) 
+  def eval(:v), do: applyK({:v}) 
+  def eval(:d), do: applyK({:d})
+  def eval(:c), do: applyK({:c})
+  def eval({:put, c}), do: applyK({:put, c}) 
+
+  def eval({:app, t0, t1}) do
+    Ops.combine(Ops.push(t1), eval(t0))
+  end
+
+  def applyT(v, t, k) do
+    case v do
+      {:d} -> applyK({:d, t}).(k)
+      {:s} -> applyK({:s, {:recur, eval(t)}}).(k)
+      {:s, {:recur, c0}} -> applyK({:s, {:recur, c0}, {:recur, eval(t)}}).(k)
+      {:s, {:recur, c0}, {:recur, c1}} -> c0.({:bindT, t, {:s2, {:recur, c1}, t, k}})
+      _ -> eval(t).({:bindV, v, k})
+    end
+  end
+  
+  def applyV(v, w, k) do
+    case v do
+      {:i} -> applyK(w).(k)
+      {:put, c} -> 
+        IO.inspect(c)
+        applyK(w).(k)
+      {:k} -> applyK({:k, w}).(k)
+      {:k, w} -> applyK(w).(k)
+      {:v} -> applyK({:v}).(k)
+      {:c} -> applyV(w, {:c, k}, k)
+      {:c, k1} -> applyK(w).(k1)
+      {:d, t0} -> eval(t0).({:bindW, w, k})
+    end
+  end
+
+  def applyK(v) do
+    fn k -> applyK1(k, v) end
+  end
+
+  def applyK1(:return, v), do: v
+  def applyK1({:bindT, t, k}, v), do: applyT(v, t, k)
+  def applyK1({:bindV, v, k}, w), do: applyV(v, w, k)
+  def applyK1({:bindW, w, k}, v), do: applyV(v, w, k)
+  def applyK1({:s2, {:recur, c1}, t, k}, v), do: c1.({:bindT, t, {:s1, v, k}}) 
+  def applyK1({:s1, v, k}, w), do: applyV(v, w, k)
+  
+  def main(t), do: eval(t).(:return)
+end
+```
+
+```elixir
+Eval5.main({:app, {:app, {:app, :s, :d}, {:app, :c, :k}}, :i})
 ```
