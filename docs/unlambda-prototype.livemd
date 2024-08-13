@@ -1,0 +1,215 @@
+# Unlambda at breakneck speed
+
+## A simple evaluator
+
+We represent unlambda terms as atoms. The only operator is `:app`. The functions are `s`, `k`, `i`, `v`, `{:dot, char}`, `d`, and `c`. We can also add `r` `g` (reset and go).
+
+```elixir
+defmodule Eval1 do
+  def eval(:i), do: {:i}
+  def eval(:s), do: {:s}
+  def eval(:k), do: {:k}
+  def eval(:v), do: {:v}
+  def eval(:d), do: {:d}
+  # def eval(:c), do: {:c}   # after the CPS transform
+
+  def eval({:app, t0, t1}) do
+    v = eval(t0)
+    case v do
+      {:d} -> {:d, t1}
+      {:d, t0} -> eval({:app, t0, t1})
+      _ ->
+        w = eval(t1)
+        case v do
+          {:i} -> w
+          {:s} -> {:s, w}
+          {:s, w0} -> {:s, w0, w}
+          {:s, w0, w1} -> throw("unimplemented")
+          # apply the values together, like eval({:app, {:app, w0, w}, {:app, w1, w}})
+          {:k} -> {:k, w}
+          {:k, w} -> w
+          {:v} -> {:v}
+        end
+    end
+  end
+
+  def main(t), do: eval(t)
+end
+```
+
+```elixir
+k = :k
+i = :i
+Eval1.main({:app, {:app, k, i}, k})
+```
+
+Yeah, it works. Note that it is almost an abstract machine now! Then CPS transform it...
+
+```elixir
+defmodule Eval2 do
+  def eval(:i, k), do: k.({:i})
+  def eval(:s, k), do: k.({:s})
+  def eval(:k, k), do: k.({:k})
+  def eval(:v, k), do: k.({:v})
+  def eval(:d, k), do: k.({:d})
+  def eval(:c, k), do: k.({:c})   # added after the CPS transform
+  def eval({:put, c}, k) do
+    IO.puts(c)
+    k.({:i})
+  end
+
+  def eval({:app, t0, t1}, k) do
+    eval(t0, fn v ->
+      case v do
+        {:d} -> k.({:d, t1})
+        _ -> eval(t1, fn w -> app(v, w, k) end)
+      end
+    end)
+  end
+  
+  def app(v, w, k) do
+    case v do
+      {:i} -> k.(w)
+      {:s} -> k.({:s, w})
+      {:s, w0} -> k.({:s, w0, w})
+      {:s, w0, w1} -> app(w0, w, fn l -> app(w1, w, fn r -> app(l, r, k) end) end)
+      {:k} -> k.({:k, w})
+      {:k, w} -> k.(w)
+      {:v} -> k.({:v})
+      {:c} -> app(w, {:c, k}, k)
+      {:c, k1} -> k1.(w)
+      {:d, t0} -> eval(t0, fn w0 -> app(w0, w, k) end)
+    end
+  end
+  
+  def main(t), do: eval(t, fn k -> k end)
+end
+```
+
+```elixir
+Eval2.main({:app, {:app, {:app, :s, :i}, {:app, :d, :i}}, :i})
+```
+
+Now defunctionalize the kontinuations.
+
+```elixir
+defmodule Eval3 do
+  def eval(:i, k), do: thenKont(k, {:i})
+  def eval(:s, k), do: thenKont(k, {:s})
+  def eval(:k, k), do: thenKont(k, {:k})
+  def eval(:v, k), do: thenKont(k, {:v})
+  def eval(:d, k), do: thenKont(k, {:d})
+  def eval(:c, k), do: thenKont(k, {:c})
+  def eval({:put, c}, k), do: thenKont(k, {:put, c})
+
+  def eval({:app, t0, t1}, k) do
+    eval(t0, {:bindT, t1, k})
+  end
+
+  def applyT(v, t, k) do
+    case v do
+      {:d} -> thenKont(k, {:d, t})
+      _ -> eval(t, {:bindV, v, k})
+    end
+  end
+  
+  def applyV(v, w, k) do
+    case v do
+      {:i} -> thenKont(k, w)
+      {:put, c} -> 
+        IO.inspect(c)
+        thenKont(k, w)
+      {:s} -> thenKont(k, {:s, w})
+      {:s, w0} -> thenKont(k, {:s, w0, w})
+      {:s, w0, w1} -> applyV(w0, w, {:s2, w1, w, k})
+      {:k} -> thenKont(k, {:k, w})
+      {:k, w} -> thenKont(k, w)
+      {:v} -> thenKont(k, {:v})
+      {:c} -> applyV(w, {:c, k}, k)
+      {:c, k1} -> thenKont(k1, w)
+      {:d, t0} -> eval(t0, {:bindW, w, k})
+    end
+  end
+
+  def thenKont(:return, v), do: v
+  def thenKont({:bindT, t, k}, v), do: applyT(v, t, k)
+  def thenKont({:bindV, v, k}, w), do: applyV(v, w, k)
+  def thenKont({:bindW, w, k}, v), do: applyV(v, w, k)
+  def thenKont({:s2, w1, w, k}, l), do: applyV(w1, w, {:s1, l, k}) 
+  def thenKont({:s1, l, k}, r), do: applyV(l, r, k)
+  
+  def main(t), do: eval(t, :return)
+end
+```
+
+```elixir
+Eval3.main({:app, {:app, {:app, :s, :i}, {:app, :d, :i}}, :i})
+```
+
+And we've arrived at an abstract machine! But to make this a virtual machine, we need to do more work.
+
+(an abstract machine operates on a syntax tree, while a virtual machine operates on a flat list.)
+
+<!-- livebook:{"break_markdown":true} -->
+
+First make it compositional and curried.
+
+Compositional means that each evaluated term must come from the arguments, not from a stored argument.
+
+After currying, the eval function returns a function that accepts a kontinution.
+
+```elixir
+defmodule Eval4 do
+  def eval(:i, k), do: thenKont(k, {:i})
+  def eval(:s, k), do: thenKont(k, {:s})
+  def eval(:k, k), do: thenKont(k, {:k})
+  def eval(:v, k), do: thenKont(k, {:v})
+  def eval(:d, k), do: thenKont(k, {:d})
+  def eval(:c, k), do: thenKont(k, {:c})
+  def eval({:put, c}, k), do: thenKont(k, {:put, c})
+
+  def eval({:app, t0, t1}, k) do
+    eval(t0, {:bindT, t1, k})
+  end
+
+  def applyT(v, t, k) do
+    case v do
+      {:d} -> thenKont(k, {:d, t})
+      _ -> eval(t, {:bindV, v, k})
+    end
+  end
+  
+  def applyV(v, w, k) do
+    case v do
+      {:i} -> thenKont(k, w)
+      {:put, c} -> 
+        IO.inspect(c)
+        thenKont(k, w)
+      {:s} -> thenKont(k, {:s, w})
+      {:s, w0} -> thenKont(k, {:s, w0, w})
+      {:s, w0, w1} -> applyV(w0, w, {:s2, w1, w, k})
+      {:k} -> thenKont(k, {:k, w})
+      {:k, w} -> thenKont(k, w)
+      {:v} -> thenKont(k, {:v})
+      {:c} -> applyV(w, {:c, k}, k)
+      {:c, k1} -> thenKont(k1, w)
+      {:d, t0} -> eval(t0, {:bindW, w, k})
+    end
+  end
+
+  def thenKont(:return, v), do: v
+  def thenKont({:bindT, t, k}, v), do: applyT(v, t, k)
+  def thenKont({:bindV, v, k}, w), do: applyV(v, w, k)
+  def thenKont({:bindW, w, k}, v), do: applyV(v, w, k)
+  # potentially parallel! but doing this requires two kontinuation stacks.
+  # fibers!
+  def thenKont({:s2, w1, w, k}, l), do: applyV(w1, w, {:s1, l, k}) 
+  def thenKont({:s1, l, k}, r), do: applyV(l, r, k)
+  
+  def main(t), do: eval(t, :return)
+end
+```
+
+```elixir
+Eval4.main({:app, {:app, {:app, :s, :i}, {:app, :d, :i}}, :i})
+```

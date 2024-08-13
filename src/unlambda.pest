@@ -1,0 +1,7 @@
+main = { SOI ~ term ~ EOI }
+term = { atomic | putchar | app }
+app = { "`" ~ term ~ term }
+atomic = { "i" | "s" | "k" | "v" | "d" | "c" | "r" }
+putchar = @{ "." ~ ANY }
+
+WHITESPACE = _{ " " | NEWLINE }
