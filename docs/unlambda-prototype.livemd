@@ -62,6 +62,14 @@ defmodule Eval2 do
     eval(t0, fn v ->
       case v do
         {:d} -> k.({:d, t1})
+        {:s} -> k.({:s, t1})
+        {:s, st0} -> k.({:s, st0, t1})
+        {:s, st0, st1} -> 
+          eval({:app, st0, t1}, fn w0 -> 
+            eval({:app, st1, t1}, fn w1 -> 
+              app(w0, w1, k)
+            end)
+          end)
         _ -> eval(t1, fn w -> app(v, w, k) end)
       end
     end)
@@ -70,9 +78,6 @@ defmodule Eval2 do
   def app(v, w, k) do
     case v do
       {:i} -> k.(w)
-      {:s} -> k.({:s, w})
-      {:s, w0} -> k.({:s, w0, w})
-      {:s, w0, w1} -> app(w0, w, fn l -> app(w1, w, fn r -> app(l, r, k) end) end)
       {:k} -> k.({:k, w})
       {:k, w} -> k.(w)
       {:v} -> k.({:v})
@@ -87,20 +92,20 @@ end
 ```
 
 ```elixir
-Eval2.main({:app, {:app, {:app, :s, :i}, {:app, :d, :i}}, :i})
+Eval2.main({:app, {:app, {:app, :s, :d}, {:app, :k, :k}}, :i})
 ```
 
 Now defunctionalize the kontinuations.
 
 ```elixir
 defmodule Eval3 do
-  def eval(:i, k), do: thenKont(k, {:i})
-  def eval(:s, k), do: thenKont(k, {:s})
-  def eval(:k, k), do: thenKont(k, {:k})
-  def eval(:v, k), do: thenKont(k, {:v})
-  def eval(:d, k), do: thenKont(k, {:d})
-  def eval(:c, k), do: thenKont(k, {:c})
-  def eval({:put, c}, k), do: thenKont(k, {:put, c})
+  def eval(:i, k), do: applyK(k, {:i})
+  def eval(:s, k), do: applyK(k, {:s})
+  def eval(:k, k), do: applyK(k, {:k})
+  def eval(:v, k), do: applyK(k, {:v})
+  def eval(:d, k), do: applyK(k, {:d})
+  def eval(:c, k), do: applyK(k, {:c})
+  def eval({:put, c}, k), do: applyK(k, {:put, c})
 
   def eval({:app, t0, t1}, k) do
     eval(t0, {:bindT, t1, k})
@@ -108,42 +113,42 @@ defmodule Eval3 do
 
   def applyT(v, t, k) do
     case v do
-      {:d} -> thenKont(k, {:d, t})
+      {:d} -> applyK(k, {:d, t})
+      {:s} -> applyK(k, {:s, t})
+      {:s, t0} -> applyK(k, {:s, t0, t})
+      {:s, t0, t1} -> eval({:app, t0, t}, {:s2, t1, t, k})
       _ -> eval(t, {:bindV, v, k})
     end
   end
   
   def applyV(v, w, k) do
     case v do
-      {:i} -> thenKont(k, w)
+      {:i} -> applyK(k, w)
       {:put, c} -> 
         IO.inspect(c)
-        thenKont(k, w)
-      {:s} -> thenKont(k, {:s, w})
-      {:s, w0} -> thenKont(k, {:s, w0, w})
-      {:s, w0, w1} -> applyV(w0, w, {:s2, w1, w, k})
-      {:k} -> thenKont(k, {:k, w})
-      {:k, w} -> thenKont(k, w)
-      {:v} -> thenKont(k, {:v})
+        applyK(k, w)
+      {:k} -> applyK(k, {:k, w})
+      {:k, w} -> applyK(k, w)
+      {:v} -> applyK(k, {:v})
       {:c} -> applyV(w, {:c, k}, k)
-      {:c, k1} -> thenKont(k1, w)
+      {:c, k1} -> applyK(k1, w)
       {:d, t0} -> eval(t0, {:bindW, w, k})
     end
   end
 
-  def thenKont(:return, v), do: v
-  def thenKont({:bindT, t, k}, v), do: applyT(v, t, k)
-  def thenKont({:bindV, v, k}, w), do: applyV(v, w, k)
-  def thenKont({:bindW, w, k}, v), do: applyV(v, w, k)
-  def thenKont({:s2, w1, w, k}, l), do: applyV(w1, w, {:s1, l, k}) 
-  def thenKont({:s1, l, k}, r), do: applyV(l, r, k)
+  def applyK(:return, v), do: v
+  def applyK({:bindT, t, k}, v), do: applyT(v, t, k)
+  def applyK({:bindV, v, k}, w), do: applyV(v, w, k)
+  def applyK({:bindW, w, k}, v), do: applyV(v, w, k)
+  def applyK({:s2, t1, t, k}, v), do: eval({:app, t1, t}, {:s1, v, k}) 
+  def applyK({:s1, v, k}, w), do: applyV(v, w, k)
   
   def main(t), do: eval(t, :return)
 end
 ```
 
 ```elixir
-Eval3.main({:app, {:app, {:app, :s, :i}, {:app, :d, :i}}, :i})
+Eval3.main({:app, {:app, {:app, :s, :d}, {:app, :k, :k}}, :i})
 ```
 
 And we've arrived at an abstract machine! But to make this a virtual machine, we need to do more work.
@@ -160,56 +165,62 @@ After currying, the eval function returns a function that accepts a kontinution.
 
 ```elixir
 defmodule Eval4 do
-  def eval(:i, k), do: thenKont(k, {:i})
-  def eval(:s, k), do: thenKont(k, {:s})
-  def eval(:k, k), do: thenKont(k, {:k})
-  def eval(:v, k), do: thenKont(k, {:v})
-  def eval(:d, k), do: thenKont(k, {:d})
-  def eval(:c, k), do: thenKont(k, {:c})
-  def eval({:put, c}, k), do: thenKont(k, {:put, c})
+  def eval(:i), do: fn k -> applyK(k, {:i}) end
+  def eval(:s), do: fn k -> applyK(k, {:s}) end
+  def eval(:k), do: fn k -> applyK(k, {:k}) end
+  def eval(:v), do: fn k -> applyK(k, {:v}) end
+  def eval(:d), do: fn k -> applyK(k, {:d}) end
+  def eval(:c), do: fn k -> applyK(k, {:c}) end
+  def eval({:put, c}), do: fn k -> applyK(k, {:put, c}) end
 
-  def eval({:app, t0, t1}, k) do
-    eval(t0, {:bindT, t1, k})
+  def eval({:app, t0, t1}) do
+    fn k ->
+      eval(t0).({:bindT, t1, k})
+    end
   end
 
-  def applyT(v, t, k) do
-    case v do
-      {:d} -> thenKont(k, {:d, t})
-      _ -> eval(t, {:bindV, v, k})
+  def applyT(v) do
+    fn(t, k) ->
+      case v do
+        {:d} -> applyK(k, {:d, t})
+        _ -> eval(t).({:bindV, v, k})
+      end
     end
   end
   
-  def applyV(v, w, k) do
-    case v do
-      {:i} -> thenKont(k, w)
-      {:put, c} -> 
-        IO.inspect(c)
-        thenKont(k, w)
-      {:s} -> thenKont(k, {:s, w})
-      {:s, w0} -> thenKont(k, {:s, w0, w})
-      {:s, w0, w1} -> applyV(w0, w, {:s2, w1, w, k})
-      {:k} -> thenKont(k, {:k, w})
-      {:k, w} -> thenKont(k, w)
-      {:v} -> thenKont(k, {:v})
-      {:c} -> applyV(w, {:c, k}, k)
-      {:c, k1} -> thenKont(k1, w)
-      {:d, t0} -> eval(t0, {:bindW, w, k})
+  def applyV(v) do
+    fn(w, k) ->
+      case v do
+        {:i} -> applyK(k, w)
+        {:put, c} -> 
+          IO.inspect(c)
+          applyK(k, w)
+        {:s} -> applyK(k, {:s, w})
+        {:s, w0} -> applyK(k, {:s, w0, w})
+        {:s, w0, w1} -> applyV(w0).(w, {:s2, w1, w, k})
+        {:k} -> applyK(k, {:k, w})
+        {:k, w} -> applyK(k, w)
+        {:v} -> applyK(k, {:v})
+        {:c} -> applyV(w).({:c, k}, k)
+        {:c, k1} -> applyK(k1, w)
+        {:d, t0} -> eval(t0).({:bindW, w, k})
+      end
     end
   end
 
-  def thenKont(:return, v), do: v
-  def thenKont({:bindT, t, k}, v), do: applyT(v, t, k)
-  def thenKont({:bindV, v, k}, w), do: applyV(v, w, k)
-  def thenKont({:bindW, w, k}, v), do: applyV(v, w, k)
+  def applyK(:return, v), do: v
+  def applyK({:bindT, t, k}, v), do: applyT(v).(t, k)
+  def applyK({:bindV, v, k}, w), do: applyV(v).(w, k)
+  def applyK({:bindW, w, k}, v), do: applyV(v).(w, k)
   # potentially parallel! but doing this requires two kontinuation stacks.
   # fibers!
-  def thenKont({:s2, w1, w, k}, l), do: applyV(w1, w, {:s1, l, k}) 
-  def thenKont({:s1, l, k}, r), do: applyV(l, r, k)
+  def applyK({:s2, w1, w, k}, l), do: applyV(w1).(w, {:s1, l, k}) 
+  def applyK({:s1, l, k}, r), do: applyV(l).(r, k)
   
-  def main(t), do: eval(t, :return)
+  def main(t), do: eval(t).(:return)
 end
 ```
 
 ```elixir
-Eval4.main({:app, {:app, {:app, :s, :i}, {:app, :d, :i}}, :i})
+Eval3.main({:app, {:app, {:app, :s, :d}, {:app, :c, :k}}, :i})
 ```
