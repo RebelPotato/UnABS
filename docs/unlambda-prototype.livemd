@@ -1,21 +1,60 @@
 # Unlambda at breakneck speed
 
+## A simple parser
+
+```elixir
+defmodule UnParser do
+  def parseThing(str) do
+    {c, sliced} = String.split_at(str, 1)
+    case c do
+      "k" -> {:k, sliced}
+      "s" -> {:s, sliced}
+      "i" -> {:i, sliced}
+      "d" -> {:d, sliced}
+      "c" -> {:c, sliced}
+      "v" -> {:v, sliced}
+      "r" -> {{:put, "\n"}, sliced}
+      "." -> 
+        {char, sliced} = String.split_at(sliced, 1)
+        {{:put, char}, sliced}
+      "`" ->
+        {v, sliced} = parseThing(sliced)
+        {w, sliced} = parseThing(sliced)
+        {{:app, v, w}, sliced}
+    end
+  end
+
+  def parse!(str) do
+    {op, ""} = parseThing(str)
+    op
+  end
+end
+```
+
+```elixir
+UnParser.parse!("``r`cd`.*`cd")
+```
+
 ## A simple evaluator
+
+`Author's note: this document is more of a lab note and is riddled with errors. I will write a more complete one as soon as I want to. You have been warned.`
+
+<!-- livebook:{"break_markdown":true} -->
 
 We represent unlambda terms as atoms. The only operator is `:app`. The functions are `s`, `k`, `i`, `v`, `{:dot, char}`, `d`, and `c`. We can also add `r` `g` (reset and go).
 
 ```elixir
 defmodule Eval1 do
-  
+  # utterly broken, revisit someday
   def eval({:app, t0, t1}) do
     v = eval(t0)
     case v do
       {:d} -> {:d, t1}
       {:d, t0} -> eval({:app, t0, t1})
       {:i} -> eval(t1)
-      {:s} -> {:s, eval(t1)}
-      {:s, v0} -> {:s, v0, eval(t1)}
-      {:s, v0, v1} -> eval({:app, {:app, t0, t1}, {:app, t00, t1}})
+      {:s} -> {:s, t1}
+      {:s, t0} -> {:s, t0, t1}
+      {:s, t0, t00} -> eval({:app, {:app, t0, t1}, {:app, t00, t1}})
       {:k} -> {:k, eval(t1)}
       {:k, t} -> t
       {:v} -> {:v}
@@ -23,14 +62,14 @@ defmodule Eval1 do
   end
   def eval(x), do: x
   
-  def main(t), do: eval(t)
+  def main(str), do: eval(UnParser.parse!(str))
 end
 ```
 
 ```elixir
 k = {:k}
 i = {:i}
-Eval1.main({:app, {:app, k, i}, k})
+Eval1.main("``kik")
 ```
 
 Yeah, it works. Note that it is almost an abstract machine now! Then CPS transform it...
@@ -81,10 +120,7 @@ defmodule Eval3 do
 
   def applyT(v, t, k) do
     case v do
-      {:d} -> applyK(k, {:d, t})
-      {:s} -> applyK(k, {:s, t})
-      {:s, t0} -> applyK(k, {:s, t0, t})
-      {:s, t0, t1} -> eval({:app, t0, t}, {:s2, t1, t, k})
+      {:d} -> applyK(k, {:dt, t})
       _ -> eval(t, {:bindV, v, k})
     end
   end
@@ -100,7 +136,12 @@ defmodule Eval3 do
       {:v} -> applyK(k, {:v})
       {:c} -> applyV(w, {:c, k}, k)
       {:c, k1} -> applyK(k1, w)
-      {:d, t0} -> eval(t0, {:bindW, w, k})
+      {:d} -> applyK(k, {:dv, w})
+      {:dt, t0} -> eval(t0, {:bindW, w, k})
+      {:dv, v0} -> applyV(v0, w, k)
+      {:s} -> applyK(k, {:s, w})
+      {:s, v0} -> applyK(k, {:s, v0, w})
+      {:s, v0, v1} -> applyV(v0, w, {:s2, v1, w, k})
     end
   end
 
@@ -108,16 +149,16 @@ defmodule Eval3 do
   def applyK({:bindT, t, k}, v), do: applyT(v, t, k)
   def applyK({:bindV, v, k}, w), do: applyV(v, w, k)
   def applyK({:bindW, w, k}, v), do: applyV(v, w, k)
-  def applyK({:s2, t1, t, k}, v), do: eval({:app, t1, t}, {:s1, v, k}) 
+  def applyK({:s2, v1, w, k}, v), do: applyV(v1, w, {:s1, v, k}) 
   def applyK({:s1, v, k}, w), do: applyV(v, w, k)
   
-  def main(t), do: eval(t, :return)
+  def main(str), do: eval(UnParser.parse!(str), :return)
 end
 ```
 
-```elixir
-Eval3.main({:app, {:app, {:app, :s, :d}, {:app, :k, :k}}, :i})
-```
+````elixir
+Eval3.main("```sd`cki")
+````
 
 And we've arrived at an abstract machine! But to make this a virtual machine, we need to do more work.
 
@@ -125,39 +166,46 @@ And we've arrived at an abstract machine! But to make this a virtual machine, we
 
 <!-- livebook:{"break_markdown":true} -->
 
-First make it compositional and curried.
+First curry it. After currying, the eval function returns a function that accepts a kontinution.
+
+Then make it compositional.
 
 Compositional means that each evaluated term must come from the arguments, not from a stored argument.
 
-After currying, the eval function returns a function that accepts a kontinution.
-
 ```elixir
 defmodule Eval4 do
-  def eval(:i), do: applyK({:i})
-  def eval(:s), do: applyK({:s}) 
-  def eval(:k), do: applyK({:k}) 
-  def eval(:v), do: applyK({:v}) 
-  def eval(:d), do: applyK({:d})
-  def eval(:c), do: applyK({:c})
-  def eval({:put, c}), do: applyK({:put, c}) 
-
-  def eval({:app, t0, t1}) do
-    fn k ->
-      eval(t0).({:bindT, t1, k})
-    end
-  end
-  def applyT(v, t, k) do
-    case v do
-      {:d} -> applyK({:d, t}).(k)
-      {:s} -> applyK({:s, {:recur, eval(t)}}).(k)
-      {:s, {:recur, c0}} -> applyK({:s, {:recur, c0}, {:recur, eval(t)}}).(k)
-      {:s, {:recur, c0}, {:recur, c1}} -> c0.({:bindT, t, {:s2, {:recur, c1}, t, k}})
-      _ -> eval(t).({:bindV, v, k})
-    end
+  def combine(f, g) do
+    fn x -> f.(g.(x)) end
   end
   
+  def eval(:i), do: applyK({:i})
+  def eval(:s), do: applyK({:s})
+  def eval(:k), do: applyK({:k})
+  def eval(:v), do: applyK({:v})
+  def eval(:d), do: applyK({:d})
+  def eval(:c), do: applyK({:c})
+  def eval({:put, c}), do: applyK({:put, c})
+
+  def eval({:app, t0, t1}) do
+    combine(eval(t0), fn k -> {:bindT, t1, k} end)
+  end
+
+  def applyT(v, t, k) do
+    # switch uses v and k
+    switch = fn w ->
+        case v do
+          {:d} -> applyK({:dt, {:recur, w}}).(k)
+          _ -> w.({:bindV, v, k})
+        end
+      end 
+    switch.(eval(t)) # not a combine but acceptable
+  end
+
+  # wait a minuite, v is the one to be curried!
   def applyV(v, w, k) do
+    # we wrap everything not v, w and k into a Recur
     case v do
+      # type 1: returns a value
       {:i} -> applyK(w).(k)
       {:put, c} -> 
         IO.inspect(c)
@@ -165,32 +213,46 @@ defmodule Eval4 do
       {:k} -> applyK({:k, w}).(k)
       {:k, w} -> applyK(w).(k)
       {:v} -> applyK({:v}).(k)
-      {:c} -> applyV(w, {:c, k}, k)
-      {:c, k1} -> applyK(w).(k1)
-      {:d, t0} -> eval(t0).({:bindW, w, k})
+      {:c} -> applyV(w, {:c, {:recur, fn t -> t.(k) end}}, k)
+      {:c, {:recur, k1fn}} -> k1fn.(applyK(w))  # applyK(w).(k1)
+      {:d} -> applyK({:dv, {:recur, fn (w0, k) -> applyV(w, w0, k) end}}).(k)
+      {:dv, {:recur, v0fn}} -> v0fn.(w, k)  # applyV(v0, w, k)
+      {:dt, {:recur, t0fn}} -> t0fn.({:bindW, w, k}) # eval(t).({:bindW, w, k})
+      {:s} -> applyK({:s, {
+        :recur, 
+        fn (w0, k0) -> 
+          applyK({:s, {:recur, fn (w1, k1) -> applyV(w, w1, {:s2, w0, w1, k1}) end}}).(k0) 
+        end
+      }}).(k)
+      # all s actions are stuffed here
+      # applyK({:s, v0, w}).(k)
+      # applyV(v0, w, {:s2, v1, w, k})
+      {:s, {:recur, v0fn}} -> v0fn.(w, k) 
+
     end
   end
 
-  def applyK(v) do
-    fn k -> applyK1(k, v) end
-  end
+  def applyK(v), do: fn k -> applyK1(k, v) end
 
   def applyK1(:return, v), do: v
+  # the only function that applys a term
+  # this can be easily inlined, so
   def applyK1({:bindT, t, k}, v), do: applyT(v, t, k)
+  # the rest applys values
   def applyK1({:bindV, v, k}, w), do: applyV(v, w, k)
   def applyK1({:bindW, w, k}, v), do: applyV(v, w, k)
-  def applyK1({:s2, {:recur, c1}, t, k}, v), do: c1.({:bindT, t, {:s1, v, k}}) 
+  def applyK1({:s2, v1, w, k}, v), do: applyV(v1, w, {:s1, v, k}) 
   def applyK1({:s1, v, k}, w), do: applyV(v, w, k)
   
-  def main(t), do: eval(t).(:return)
+  def main(str), do: eval(UnParser.parse!(str)).(:return)
 end
 ```
 
-```elixir
-Eval4.main({:app, {:app, {:app, :s, :d}, {:app, :c, :k}}, :i})
-```
+````elixir
+Eval4.main("```sd`cki")
+````
 
-After this, we can extract all functions
+After this, we can extract all functions from eval into an Ops module
 
 ```elixir
 # defmodule Ops do

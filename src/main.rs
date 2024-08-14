@@ -1,10 +1,11 @@
-pub mod interpreter;
+pub mod machines;
+pub mod term;
 
 use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
-use interpreter::parse_term;
+use term::parse_term;
 
 /// UnABS: Unlambda At Breakneck Speed
 #[derive(Parser, Debug)]
@@ -32,7 +33,7 @@ fn main() {
 
     let term = parse_term(program.as_str());
     println!("Term:\n{}\n", term);
-    let state = interpreter::new(term);
+    let state = machines::acopy::new(term);
 
     if args.interactive {
         let mut state = state;
@@ -48,8 +49,8 @@ fn main() {
                 _ => (),
             }
             match state.step() {
-                interpreter::SEither::S(s) => state = s,
-                interpreter::SEither::V(v) => break v,
+                Ok(s) => state = s,
+                Err(v) => break v,
             }
             println!("{}", state);
         };

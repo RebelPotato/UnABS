@@ -1,87 +1,10 @@
-use pest::Parser;
-use pest_derive::Parser;
 use std::char;
 use std::fmt::Display;
 use std::io::Write;
+use crate::term::Term;
 
-#[derive(Debug, Clone)]
-pub enum Term {
-    I,
-    S,
-    K,
-    V,
-    D,
-    C,
-    R,
-    Put(char),
-    App(Box<Term>, Box<Term>),
-    // Can do better: a flat AST
-}
-
-#[derive(Parser)]
-#[grammar = "unlambda.pest"]
-struct UnParser;
-
-fn parse_to_term(pair: pest::iterators::Pair<Rule>) -> Term {
-    match pair.as_rule() {
-        Rule::term => parse_to_term(pair.into_inner().next().unwrap()),
-        Rule::atomic => match pair.as_str() {
-            "i" => Term::I,
-            "s" => Term::S,
-            "k" => Term::K,
-            "v" => Term::V,
-            "d" => Term::D,
-            "c" => Term::C,
-            "r" => Term::R,
-            _ => unreachable!(),
-        },
-        Rule::putchar => {
-            let str = pair.as_str();
-            let char = str.chars().nth(1).unwrap();
-            Term::Put(char)
-        }
-        Rule::app => {
-            let mut pairs = pair.into_inner();
-            let t0 = parse_to_term(pairs.next().unwrap());
-            let t1 = parse_to_term(pairs.next().unwrap());
-            Term::App(Box::new(t0), Box::new(t1))
-        }
-        _ => unreachable!(),
-    }
-}
-
-pub fn parse_term(s: &str) -> Term {
-    let parsed = UnParser::parse(Rule::main, s)
-        .expect("parse error")
-        .next()
-        .unwrap();
-    // the term is the second child of the main rule
-    let mut pair = parsed.into_inner();
-    let term = pair.next().unwrap();
-    parse_to_term(term)
-}
-
-impl Display for Term {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Term::I => write!(f, "i"),
-            Term::S => write!(f, "s"),
-            Term::K => write!(f, "k"),
-            Term::V => write!(f, "v"),
-            Term::D => write!(f, "d"),
-            Term::C => write!(f, "c"),
-            Term::R => write!(f, "r"),
-            Term::Put(c) => {
-                if *c == '\n' {
-                    write!(f, "r")
-                } else {
-                    write!(f, ".{}", c)
-                }
-            }
-            Term::App(t0, t1) => write!(f, "`{}{}", t0, t1),
-        }
-    }
-}
+// A copying abstract machine for unlambda
+// Not the most efficient implementation!
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -134,8 +57,7 @@ pub enum Kont {
     BindT(Box<Term>, Box<Option<Kont>>),
     BindV(Box<Value>, Box<Option<Kont>>),
     BindW(Box<Value>, Box<Option<Kont>>),
-    S2(Box<Value>, Box<Value>, Box<Option<Kont>>),
-    S1(Box<Value>, Box<Option<Kont>>),
+    SWait(Box<Value>, Box<Value>, Box<Option<Kont>>),
 }
 impl Display for Kont {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -164,16 +86,8 @@ impl Display for Kont {
                     write!(f, "")
                 }
             }
-            Kont::S2(w0, w1, k) => {
-                write!(f, "S2({}; {})", w0, w1)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
-                }
-            }
-            Kont::S1(w, k) => {
-                write!(f, "S1({})", w)?;
+            Kont::SWait(w0, w1, k) => {
+                write!(f, "SWait({}; {})", w0, w1)?;
                 if let Some(k) = k.as_ref() {
                     write!(f, " {}", k)
                 } else {
@@ -258,6 +172,7 @@ fn apply_v(v: Value, w: Value, k: Option<Kont>) -> State {
         Value::K0 => State::ApplyKont(k, Value::K1(Box::new(w))),
         Value::K1(w0) => State::ApplyKont(k, *w0),
         Value::V0 => State::ApplyKont(k, Value::V0),
+        // This clones the kontinuation. How can we avoid this?
         Value::C0 => State::ApplyV(w, Value::C1(Box::new(k.clone())), k),
         Value::C1(k1) => State::ApplyKont(*k1, w),
         Value::D0 => State::ApplyKont(k, Value::D1V(Box::new(w))),
@@ -266,9 +181,9 @@ fn apply_v(v: Value, w: Value, k: Option<Kont>) -> State {
         Value::S0 => State::ApplyKont(k, Value::S1(Box::new(w))),
         Value::S1(v0) => State::ApplyKont(k, Value::S2(v0, Box::new(w))),
         Value::S2(v0, v1) => {
-            // This copys the third value. Very inefficient, but sharing requires pesky lifetime annotations.
-            // TODO: make a flat list or something?
-            State::ApplyV(*v0, w.clone(), Some(Kont::S2(v1, Box::new(w), Box::new(k))))
+            // This copys the third value. A tree clone! Very inefficient.
+            // How do we share? Rc? Cow? Make a flat list or something?
+            State::ApplyV(*v0, w.clone(), Some(Kont::SWait(v1, Box::new(w), Box::new(k))))
         }
     }
 }
@@ -278,14 +193,8 @@ fn apply_kont(k: Kont, w: Value) -> State {
         Kont::BindT(t, k) => State::ApplyT(w, *t, *k),
         Kont::BindV(v, k) => State::ApplyV(*v, w, *k),
         Kont::BindW(w1, k) => State::ApplyV(w, *w1, *k),
-        Kont::S2(v1, v, k) => State::ApplyV(*v1, *v, Some(Kont::S1(Box::new(w), k))),
-        Kont::S1(l, k) => State::ApplyV(*l, w, *k),
+        Kont::SWait(v1, v, k) => State::ApplyV(*v1, *v, Some(Kont::BindV(Box::new(w), k))),
     }
-}
-
-pub enum SEither {
-    S(State),
-    V(Value),
 }
 
 pub fn new(t: Term) -> State {
@@ -293,13 +202,13 @@ pub fn new(t: Term) -> State {
 }
 
 impl State {
-    pub fn step(self) -> SEither {
+    pub fn step(self) -> Result<Self, Value> {
         match self {
-            State::Eval(t, k) => SEither::S(eval(t, k)),
-            State::ApplyT(v, t, k) => SEither::S(apply_t(v, t, k)),
-            State::ApplyV(v, w, k) => SEither::S(apply_v(v, w, k)),
-            State::ApplyKont(Some(k), w) => SEither::S(apply_kont(k, w)),
-            State::ApplyKont(None, v) => SEither::V(v),
+            State::Eval(t, k) => Ok(eval(t, k)),
+            State::ApplyT(v, t, k) => Ok(apply_t(v, t, k)),
+            State::ApplyV(v, w, k) => Ok(apply_v(v, w, k)),
+            State::ApplyKont(Some(k), w) => Ok(apply_kont(k, w)),
+            State::ApplyKont(None, v) => Err(v),
         }
     }
 
@@ -307,8 +216,8 @@ impl State {
         let mut state = self;
         loop {
             match state.step() {
-                SEither::S(s) => state = s,
-                SEither::V(v) => return v,
+                Ok(s) => state = s,
+                Err(v) => return v,
             }
         }
     }
