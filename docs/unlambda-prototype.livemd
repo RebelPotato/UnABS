@@ -60,7 +60,7 @@ defmodule Eval1 do
       {:v} -> {:v}
     end
   end
-  def eval(x), do: x
+  def eval(x), do: {x}
   
   def main(str), do: eval(UnParser.parse!(str))
 end
@@ -129,7 +129,7 @@ defmodule Eval3 do
     case v do
       {:i} -> applyK(k, w)
       {:put, c} -> 
-        IO.inspect(c)
+        IO.write(c)
         applyK(k, w)
       {:k} -> applyK(k, {:k, w})
       {:k, w} -> applyK(k, w)
@@ -141,7 +141,7 @@ defmodule Eval3 do
       {:dv, v0} -> applyV(v0, w, k)
       {:s} -> applyK(k, {:s, w})
       {:s, v0} -> applyK(k, {:s, v0, w})
-      {:s, v0, v1} -> applyV(v0, w, {:s2, v1, w, k})
+      {:s, v0, v1} -> applyV(v0, w, {:sWait, v1, w, k})
     end
   end
 
@@ -149,16 +149,15 @@ defmodule Eval3 do
   def applyK({:bindT, t, k}, v), do: applyT(v, t, k)
   def applyK({:bindV, v, k}, w), do: applyV(v, w, k)
   def applyK({:bindW, w, k}, v), do: applyV(v, w, k)
-  def applyK({:s2, v1, w, k}, v), do: applyV(v1, w, {:s1, v, k}) 
-  def applyK({:s1, v, k}, w), do: applyV(v, w, k)
+  def applyK({:sWait, v1, w, k}, v), do: applyV(v1, w, {:bindV, v, k})
   
   def main(str), do: eval(UnParser.parse!(str), :return)
 end
 ```
 
-````elixir
-Eval3.main("```sd`cki")
-````
+`````elixir
+Eval3.main("````sd`ckr`c.*")
+`````
 
 And we've arrived at an abstract machine! But to make this a virtual machine, we need to do more work.
 
@@ -205,10 +204,9 @@ defmodule Eval4 do
   def applyV(v, w, k) do
     # we wrap everything not v, w and k into a Recur
     case v do
-      # type 1: returns a value
       {:i} -> applyK(w).(k)
       {:put, c} -> 
-        IO.inspect(c)
+        IO.write(c)
         applyK(w).(k)
       {:k} -> applyK({:k, w}).(k)
       {:k, w} -> applyK(w).(k)
@@ -248,94 +246,320 @@ defmodule Eval4 do
 end
 ```
 
-````elixir
-Eval4.main("```sd`cki")
-````
-
-After this, we can extract all functions from eval into an Ops module
+`````elixir
+Eval4.main("````sd`ckr`c.*")
+`````
 
 ```elixir
-# defmodule Ops do
- 
-#   def value({:going, k}) do
-#     applyK(k, )
-#   end
-#   def value({:done}), do: {:done}
-# end
-
-defmodule Eval5 do
-
-  defmodule Ops do
-    def lift(f) do
-      fn x -> 
-        case x do
-          {:going, x} -> f.(x)
-          {:done} -> {:done}
-        end
-      end
-    end
-    
-    def combine(f, g) do
-      fn x -> g.(f.(x)) end
-    end
-    
-    def push(t1) do
-      lift(fn k -> {:going, {:bindT, t1, k}} end)
-    end
+defmodule Eval4a do
+  def combine(f, g) do
+    fn x -> f.(g.(x)) end
   end
   
   def eval(:i), do: applyK({:i})
-  def eval(:s), do: applyK({:s}) 
-  def eval(:k), do: applyK({:k}) 
-  def eval(:v), do: applyK({:v}) 
+  def eval(:s), do: applyK({:s})
+  def eval(:k), do: applyK({:k})
+  def eval(:v), do: applyK({:v})
   def eval(:d), do: applyK({:d})
   def eval(:c), do: applyK({:c})
-  def eval({:put, c}), do: applyK({:put, c}) 
+  def eval({:put, c}), do: applyK({:put, c})
 
   def eval({:app, t0, t1}) do
-    Ops.combine(Ops.push(t1), eval(t0))
+    # push t1
+    combine(eval(t0), fn k -> {:bindT, t1, k} end)
   end
 
   def applyT(v, t, k) do
+    # switch uses v and k
+    switch = fn w ->
+        case v do
+          {:d} -> applyK({:dt, {:recur, w}}).(k)
+          _ -> w.({:bindV, v, k})
+        end
+      end 
+    switch.(eval(t)) # not a combine but acceptable
+  end
+
+  # wait a minuite, v is the one to be curried!
+  def applyV(v, w, k) do
+    # should be something like combine(eval(v), push(eval(w)))
+    # but v and w are already evaluated! v from the eval, and w from applyT.
+    # however, we can be certain this function only applys a finite number of times.
+    # after this, the baton is passed to applyK.
     case v do
-      {:d} -> applyK({:d, t}).(k)
-      {:s} -> applyK({:s, {:recur, eval(t)}}).(k)
-      {:s, {:recur, c0}} -> applyK({:s, {:recur, c0}, {:recur, eval(t)}}).(k)
-      {:s, {:recur, c0}, {:recur, c1}} -> c0.({:bindT, t, {:s2, {:recur, c1}, t, k}})
-      _ -> eval(t).({:bindV, v, k})
+      {:i} -> applyK(w).(k)
+      {:put, c} -> 
+        IO.write(c)
+        applyK(w).(k)
+      {:k} -> applyK({:k, w}).(k)
+      {:k, w} -> applyK(w).(k)
+      {:v} -> applyK({:v}).(k)
+      {:c} -> applyV(w, {:c, {:recur, fn t -> t.(k) end}}, k)
+      {:c, {:recur, k1fn}} -> k1fn.(applyK(w))  # applyK(w).(k1)
+      {:d} -> applyK({:dv, {:recur, fn (w0, k) -> applyV(w, w0, k) end}}).(k)
+      {:dv, {:recur, v0fn}} -> v0fn.(w, k)  # applyV(v0, w, k)
+      {:dt, {:recur, t0fn}} -> t0fn.({:bindW, w, k}) # eval(t).({:bindW, w, k})
+      {:s} -> applyK({:s, {
+        :recur, 
+        fn (w0, k0) -> 
+          applyK({:s, {:recur, fn (w1, k1) -> applyV(w, w1, {:sWait, w0, w1, k1}) end}}).(k0) 
+        end
+      }}).(k)
+      # all s actions are stuffed here
+      # applyK({:s, v0, w}).(k)
+      # applyV(v0, w, {:s2, v1, w, k})
+      {:s, {:recur, v0fn}} -> v0fn.(w, k) 
+
     end
   end
+
+  def applyK(v), do: fn k -> applyK1(k, v) end
+
+  def applyK1(:return, v), do: v
+  # the only function that applys a term
+  # this can be easily inlined, so
+  def applyK1({:bindT, t, k}, v), do: applyT(v, t, k)
+  # the rest applys values
+  def applyK1({:bindV, v, k}, w), do: applyV(v, w, k)
+  def applyK1({:bindW, w, k}, v), do: applyV(v, w, k)
+  def applyK1({:sWait, v1, w, k}, v), do: applyV(v1, w, {:bindV, v, k}) 
   
+  def main(str), do: eval(UnParser.parse!(str)).(:return)
+end
+```
+
+```elixir
+Eval4a.main("``cc.*")
+```
+
+```elixir
+defmodule Eval4b do
+  def combine(f, g) do
+    fn x -> f.(g.(x)) end
+  end
+  
+  def eval(:i), do: applyK({:i})
+  def eval(:s), do: applyK({:s})
+  def eval(:k), do: applyK({:k})
+  def eval(:v), do: applyK({:v})
+  def eval(:d), do: applyK({:d})
+  def eval(:c), do: applyK({:c})
+  def eval({:put, c}), do: applyK({:put, c})
+
+  def eval({:app, t0, t1}) do
+    combine(eval(t0), push(eval(t1)))
+  end
+  
+  def push(r1) do
+    fn k -> {:bindT, r1, k} end
+  end
+
+  def switch(v, k) do
+    fn w ->
+      case v do
+        {:d} -> applyK({:dt, {:recur, w}}).(k)
+        _ -> w.({:bindV, v, k})
+      end
+    end 
+  end
+
   def applyV(v, w, k) do
     case v do
       {:i} -> applyK(w).(k)
       {:put, c} -> 
-        IO.inspect(c)
+        IO.write(c)
         applyK(w).(k)
       {:k} -> applyK({:k, w}).(k)
       {:k, w} -> applyK(w).(k)
       {:v} -> applyK({:v}).(k)
       {:c} -> applyV(w, {:c, k}, k)
       {:c, k1} -> applyK(w).(k1)
-      {:d, t0} -> eval(t0).({:bindW, w, k})
+      {:d} -> applyK({:dv, w}).(k)
+      {:dt, {:recur, t0fn}} -> t0fn.({:bindW, w, k})
+      {:dv, v0} -> applyV(v0, w, k)
+      {:s} -> applyK({:s, w}).(k)
+      {:s, v0} -> applyK({:s, v0, w}).(k)
+      {:s, v0, v1} -> applyV(v0, w, {:sWait, v1, w, k})
     end
   end
 
-  def applyK(v) do
-    fn k -> applyK1(k, v) end
-  end
+  def applyK(v), do: fn k -> applyK1(k, v) end
 
   def applyK1(:return, v), do: v
-  def applyK1({:bindT, t, k}, v), do: applyT(v, t, k)
+  # the only function that applys a term
+  # this can be easily inlined, so
+  def applyK1({:bindT, r, k}, v), do: switch(v, k).(r)
+  # the rest applys values
   def applyK1({:bindV, v, k}, w), do: applyV(v, w, k)
   def applyK1({:bindW, w, k}, v), do: applyV(v, w, k)
-  def applyK1({:s2, {:recur, c1}, t, k}, v), do: c1.({:bindT, t, {:s1, v, k}}) 
-  def applyK1({:s1, v, k}, w), do: applyV(v, w, k)
+  def applyK1({:sWait, v1, w, k}, v), do: applyV(v1, w, {:bindV, v, k}) 
   
-  def main(t), do: eval(t).(:return)
+  def main(str), do: eval(UnParser.parse!(str)).(:return)
+end
+```
+
+`````elixir
+Eval4b.main("````sc`ckr`c.*")
+`````
+
+After this, we can extract all functions from eval into an Ops module
+
+```elixir
+defmodule Compile5 do
+  def combine(f, g) do
+    Enum.concat(g, f)
+  end
+  
+  def eval(:i), do: applyK({:i})
+  def eval(:s), do: applyK({:s})
+  def eval(:k), do: applyK({:k})
+  def eval(:v), do: applyK({:v})
+  def eval(:d), do: applyK({:d})
+  def eval(:c), do: applyK({:c})
+  def eval({:put, c}), do: applyK({:put, c})
+
+  def eval({:app, t0, t1}) do
+    # push t1
+    push = [{:push, eval(t1)}]
+    combine(eval(t0), push)
+  end
+
+  def applyK(v), do: [{:pass, v}]
+  
+  def main(str), do: eval(UnParser.parse!(str))
 end
 ```
 
 ```elixir
-Eval5.main({:app, {:app, {:app, :s, :d}, {:app, :c, :k}}, :i})
+defmodule Eval5 do
+  
+  def eval([{:pass, v} | ins], k) do
+    case ins do
+      [] -> applyK(k, v)
+      _ -> IO.inspect(ins)
+    end
+  end
+  
+  def eval([{:push, i} | ins], k) do
+    k = push(i).(k)
+    eval(ins, k)
+  end
+  
+  def push(i1) do
+    fn k -> {:bindT, fn k -> eval(i1, k) end, k} end
+  end
+
+  def switch(v, k) do
+    fn w ->
+      case v do
+        {:d} -> applyK(k, {:dt, {:recur, w}})
+        _ -> w.({:bindV, v, k})
+      end
+    end 
+  end
+
+  def applyV(v, w, k) do
+    case v do
+      {:i} -> applyK(k, w)
+      {:put, c} -> 
+        IO.write(c)
+        applyK(k, w)
+      {:k} -> applyK(k, {:k, w})
+      {:k, w} -> applyK(k, w)
+      {:v} -> applyK(k, {:v})
+      {:c} -> applyV(w, {:c, k}, k)
+      {:c, k1} -> applyK(k1, w)
+      {:d} -> applyK(k, {:dv, w})
+      {:dt, {:recur, t0fn}} -> t0fn.({:bindW, w, k})
+      {:dv, v0} -> applyV(v0, w, k)
+      {:s} -> applyK(k, {:s, w})
+      {:s, v0} -> applyK(k, {:s, v0, w})
+      {:s, v0, v1} -> applyV(v0, w, {:sWait, v1, w, k})
+    end
+  end
+
+  def applyK(:return, v), do: v
+  # the only function that applys a term
+  # this can be easily inlined, so
+  def applyK({:bindT, r, k}, v), do: switch(v, k).(r)
+  # the rest applys values
+  def applyK({:bindV, v, k}, w), do: applyV(v, w, k)
+  def applyK({:bindW, w, k}, v), do: applyV(v, w, k)
+  def applyK({:sWait, v1, w, k}, v), do: applyV(v1, w, {:bindV, v, k}) 
+  
+  def main(ins), do: eval(ins, :return)
+end
 ```
+
+`````elixir
+compiled = Compile5.main("````sd`ckr`c.*")
+IO.inspect(compiled)
+# Eval5.main(compiled)
+`````
+
+```elixir
+defmodule Compile6 do
+  def combine(f, g) do
+    Enum.concat(g, f)
+  end
+  
+  def eval(:i), do: applyK({:i})
+  def eval(:s), do: applyK({:s})
+  def eval(:k), do: applyK({:k})
+  def eval(:v), do: applyK({:v})
+  def eval(:d), do: applyK({:d})
+  def eval(:c), do: applyK({:c})
+  def eval({:put, c}), do: applyK({:put, c})
+
+  def eval({:app, t0, t1}) do
+    # push t1
+    push = combine(eval(t1), [:push])
+    combine(eval(t0), push)
+  end
+
+  def applyK(v), do: [v]
+  
+  def main(str), do: eval(UnParser.parse!(str))
+end
+```
+
+`````elixir
+compiled = Compile6.main("````sd`ckr`c.*")
+IO.inspect(compiled)
+`````
+
+```elixir
+defmodule Abstract do
+  def elim("", _), do: ""
+  
+  def elim(str, name) do
+    {c, rest} = String.split_at(str, 1)
+    head = case c do
+      "`" -> "``s"
+      ^name -> "i"
+      str -> "`k#{str}"
+    end
+    head <> elim(rest, name)
+  end
+
+  def lam(name, body), do: elim(body, name)
+end
+```
+
+```elixir
+Abstract.lam("x", Abstract.lam("y", "`yx"))
+```
+
+`````elixir
+one = "i"
+inc = "`s``s`ksk"
+add = "``si`k`s``s`ksk"
+mul = "``s`ksk"
+pow = "i"
+
+two = "`#{inc}#{one}"
+three = "`#{inc}#{two}"
+four = "`#{inc}#{three}"
+
+IO.puts "````#{pow}#{three}``#{pow}#{four}#{four}ii"
+`````

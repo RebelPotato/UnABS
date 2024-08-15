@@ -80,3 +80,75 @@ impl Display for Term {
         }
     }
 }
+
+// #[derive(Debug, Clone)]
+// pub struct CompiledTerm(Vec<Instr>);
+
+// #[derive(Debug, Clone)]
+// pub struct Instr(Option<Primitive>); // lack of a primitive means push
+
+// #[derive(Debug, Clone)]
+// pub enum Primitive {
+//   I, K, S, V, D, C, R, Put(char),
+// }
+// // impl Display for CompiledTerm {
+// //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+// //         let reversed = self.0.iter().rev();
+// //         for instr in reversed {
+// //             match instr {
+// //                 Instr(Some(Primitive::I)) => write!(f, "i")?,
+// //                 Instr(Some(Primitive::K)) => write!(f, "k")?,
+// //                 Instr(Some(Primitive::S)) => write!(f, "s")?,
+// //                 Instr(Some(Primitive::V)) => write!(f, "v")?,
+// //                 Instr(Some(Primitive::D)) => write!(f, "d")?,
+// //                 Instr(Some(Primitive::C)) => write!(f, "c")?,
+// //                 Instr(Some(Primitive::R)) => write!(f, "r")?,
+// //                 Instr(Some(Primitive::Put(c))) => write!(f, ".{}", c)?,
+// //                 Instr(None) => write!(f, "`")?,
+// //             }
+// //         }
+// //         Ok(())
+// //     }
+// // }
+
+// fn parse_to_compiled_term(pair: pest::iterators::Pair<Rule>, arr: &mut Vec<Instr>) {
+//     match pair.as_rule() {
+//         Rule::term => parse_to_compiled_term(pair.into_inner().next().unwrap(), arr),
+//         Rule::atomic => match pair.as_str() {
+//             "i" => arr.push(Instr(Some(Primitive::I))),
+//             "s" => arr.push(Instr(Some(Primitive::S))),
+//             "k" => arr.push(Instr(Some(Primitive::K))),
+//             "v" => arr.push(Instr(Some(Primitive::V))),
+//             "d" => arr.push(Instr(Some(Primitive::D))),
+//             "c" => arr.push(Instr(Some(Primitive::C))),
+//             "r" => arr.push(Instr(Some(Primitive::R))),
+//             _ => unreachable!(),
+//         },
+//         Rule::putchar => {
+//             let str = pair.as_str();
+//             let char = str.chars().nth(1).unwrap();
+//             arr.push(Instr(Some(Primitive::Put(char))));
+//         }
+//         Rule::app => {
+//             let mut pairs = pair.into_inner();
+//             parse_to_compiled_term(pairs.next().unwrap(), arr);
+//             parse_to_compiled_term(pairs.next().unwrap(), arr);
+//             arr.push(Instr(None));
+//         }
+//         _ => unreachable!(),
+//     }
+// }
+
+// pub fn parse_compiled_term(s: &str) -> CompiledTerm {
+//     let parsed = UnParser::parse(Rule::main, s)
+//         .expect("parse error")
+//         .next()
+//         .unwrap();
+//     // the term is the second child of the main rule
+//     let mut pair = parsed.into_inner();
+//     let term = pair.next().unwrap();
+//     let mut comp = CompiledTerm(Vec::new());
+//     parse_to_compiled_term(term, &mut comp.0);
+//     comp.0.reverse();
+//     comp
+// }

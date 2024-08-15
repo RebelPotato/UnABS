@@ -1,13 +1,14 @@
+use crate::term::Term;
 use std::char;
 use std::fmt::Display;
 use std::io::Write;
-use crate::term::Term;
+use std::rc::Rc;
 
-// A copying abstract machine for unlambda
-// Not the most efficient implementation!
+// A sharing abstract machine for unlambda
+// I hope this runs f..a..s..t..
 
 #[derive(Debug, Clone)]
-pub enum Value {
+pub enum Value<'a> {
     I0,
     S0,
     K0,
@@ -15,15 +16,15 @@ pub enum Value {
     D0,
     C0,
     Put0(char),
-    S1(Box<Value>),
-    S2(Box<Value>, Box<Value>),
-    K1(Box<Value>),
-    D1T(Box<Term>),
-    D1V(Box<Value>),
-    C1(Box<Option<Kont>>),
+    S1(Rc<Value<'a>>),
+    S2(Rc<Value<'a>>, Rc<Value<'a>>),
+    K1(Rc<Value<'a>>),
+    D1T(&'a Term),
+    D1V(Rc<Value<'a>>),
+    C1(Option<Rc<Kont<'a>>>),
 }
 
-impl Display for Value {
+impl Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::I0 => write!(f, "i"),
@@ -53,13 +54,13 @@ impl Display for Value {
 }
 
 #[derive(Debug, Clone)]
-pub enum Kont {
-    BindT(Box<Term>, Box<Option<Kont>>),
-    BindV(Box<Value>, Box<Option<Kont>>),
-    BindW(Box<Value>, Box<Option<Kont>>),
-    SWait(Box<Value>, Box<Value>, Box<Option<Kont>>),
+pub enum Kont<'a> {
+    BindT(&'a Term, Option<Rc<Kont<'a>>>),
+    BindV(Rc<Value<'a>>, Option<Rc<Kont<'a>>>),
+    BindW(Rc<Value<'a>>, Option<Rc<Kont<'a>>>),
+    SWait(Rc<Value<'a>>, Rc<Value<'a>>, Option<Rc<Kont<'a>>>),
 }
-impl Display for Kont {
+impl Display for Kont<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Kont::BindT(t, k) => {
@@ -98,14 +99,14 @@ impl Display for Kont {
     }
 }
 
-pub enum State {
-    Eval(Term, Option<Kont>),
-    ApplyT(Value, Term, Option<Kont>),
-    ApplyV(Value, Value, Option<Kont>),
-    ApplyKont(Option<Kont>, Value),
+pub enum State<'a> {
+    Eval(&'a Term, Option<Rc<Kont<'a>>>),
+    ApplyT(Rc<Value<'a>>, &'a Term, Option<Rc<Kont<'a>>>),
+    ApplyV(Rc<Value<'a>>, Rc<Value<'a>>, Option<Rc<Kont<'a>>>),
+    ApplyKont(Option<Rc<Kont<'a>>>, Rc<Value<'a>>),
 }
 
-impl Display for State {
+impl Display for State<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             State::Eval(t, k) => {
@@ -131,7 +132,7 @@ impl Display for State {
             }
             State::ApplyKont(k, v) => {
                 write!(f, "State: ApplyKont\nValue: {}\n", v)?;
-                match k {
+                match k.as_ref() {
                     None => write!(f, "Kont: ()"),
                     Some(k) => write!(f, "Kont: {}", k),
                 }
@@ -140,69 +141,72 @@ impl Display for State {
     }
 }
 
-fn eval(t: Term, k: Option<Kont>) -> State {
+fn eval<'a>(t: &'a Term, k: Option<Rc<Kont<'a>>>) -> State<'a> {
     match t {
-        Term::I => State::ApplyKont(k, Value::I0),
-        Term::S => State::ApplyKont(k, Value::S0),
-        Term::K => State::ApplyKont(k, Value::K0),
-        Term::V => State::ApplyKont(k, Value::V0),
-        Term::D => State::ApplyKont(k, Value::D0),
-        Term::C => State::ApplyKont(k, Value::C0),
-        Term::R => State::ApplyKont(k, Value::Put0('\n')),
-        Term::Put(c) => State::ApplyKont(k, Value::Put0(c)),
-        Term::App(t0, t1) => State::Eval(*t0, Some(Kont::BindT(t1, Box::new(k)))),
+        Term::I => State::ApplyKont(k, Value::I0.into()),
+        Term::S => State::ApplyKont(k, Value::S0.into()),
+        Term::K => State::ApplyKont(k, Value::K0.into()),
+        Term::V => State::ApplyKont(k, Value::V0.into()),
+        Term::D => State::ApplyKont(k, Value::D0.into()),
+        Term::C => State::ApplyKont(k, Value::C0.into()),
+        Term::R => State::ApplyKont(k, Value::Put0('\n').into()),
+        Term::Put(c) => State::ApplyKont(k, Value::Put0(*c).into()),
+        Term::App(t0, t1) => State::Eval(t0.as_ref(), Some(Kont::BindT(t1.as_ref(), k).into())),
     }
 }
 
-fn apply_t(v: Value, t: Term, k: Option<Kont>) -> State {
-    match v {
-        Value::D0 => State::ApplyKont(k, Value::D1T(Box::new(t))),
-        _ => State::Eval(t, Some(Kont::BindV(Box::new(v), Box::new(k)))),
+fn apply_t<'a>(v: Rc<Value<'a>>, t: &'a Term, k: Option<Rc<Kont<'a>>>) -> State<'a> {
+    match v.as_ref() {
+        Value::D0 => State::ApplyKont(k, Value::D1T(t).into()),
+        _ => State::Eval(t, Some(Kont::BindV(v, k).into())),
     }
 }
 
-fn apply_v(v: Value, w: Value, k: Option<Kont>) -> State {
-    match v {
+fn apply_v<'a>(v: Rc<Value<'a>>, w: Rc<Value<'a>>, k: Option<Rc<Kont<'a>>>) -> State<'a> {
+    match v.as_ref() {
         Value::I0 => State::ApplyKont(k, w),
         Value::Put0(c) => {
             print!("{}", c);
             std::io::stdout().flush().unwrap();
             State::ApplyKont(k, w)
         }
-        Value::K0 => State::ApplyKont(k, Value::K1(Box::new(w))),
-        Value::K1(w0) => State::ApplyKont(k, *w0),
-        Value::V0 => State::ApplyKont(k, Value::V0),
-        // This clones the kontinuation. How can we avoid this?
-        Value::C0 => State::ApplyV(w, Value::C1(Box::new(k.clone())), k),
-        Value::C1(k1) => State::ApplyKont(*k1, w),
-        Value::D0 => State::ApplyKont(k, Value::D1V(Box::new(w))),
-        Value::D1T(t0) => State::Eval(*t0, Some(Kont::BindW(Box::new(w), Box::new(k)))),
-        Value::D1V(v0) => State::ApplyV(*v0, w, k),
-        Value::S0 => State::ApplyKont(k, Value::S1(Box::new(w))),
-        Value::S1(v0) => State::ApplyKont(k, Value::S2(v0, Box::new(w))),
-        Value::S2(v0, v1) => {
-            // This copys the third value. A tree clone! Very inefficient.
-            // How do we share? Rc? Cow? Make a flat list or something?
-            State::ApplyV(*v0, w.clone(), Some(Kont::SWait(v1, Box::new(w), Box::new(k))))
-        }
+        Value::K0 => State::ApplyKont(k, Value::K1(w).into()),
+        Value::K1(w0) => State::ApplyKont(k, w0.clone()),
+        Value::V0 => State::ApplyKont(k, Value::V0.into()),
+        Value::C0 => State::ApplyV(w, Value::C1(k.clone()).into(), k),
+        Value::C1(k1) => State::ApplyKont(k1.clone(), w),
+        Value::D0 => State::ApplyKont(k, Value::D1V(w).into()),
+        Value::D1T(t0) => State::Eval(t0, Some(Kont::BindW(w, k).into())),
+        Value::D1V(v0) => State::ApplyV(v0.clone(), w, k),
+        Value::S0 => State::ApplyKont(k, Value::S1(w).into()),
+        Value::S1(v0) => State::ApplyKont(k, Value::S2(v0.clone(), w).into()),
+        Value::S2(v0, v1) => State::ApplyV(
+            v0.clone(),
+            Rc::clone(&w),
+            Some(Kont::SWait(v1.clone(), w, k).into()),
+        ),
     }
 }
 
-fn apply_kont(k: Kont, w: Value) -> State {
-    match k {
-        Kont::BindT(t, k) => State::ApplyT(w, *t, *k),
-        Kont::BindV(v, k) => State::ApplyV(*v, w, *k),
-        Kont::BindW(w1, k) => State::ApplyV(w, *w1, *k),
-        Kont::SWait(v1, v, k) => State::ApplyV(*v1, *v, Some(Kont::BindV(Box::new(w), k))),
+fn apply_kont<'a>(k: Rc<Kont<'a>>, w: Rc<Value<'a>>) -> State<'a> {
+    match k.as_ref() {
+        Kont::BindT(t, k) => State::ApplyT(w, t, k.clone()),
+        Kont::BindV(v, k) => State::ApplyV(v.clone(), w, k.clone()),
+        Kont::BindW(w1, k) => State::ApplyV(w, w1.clone(), k.clone()),
+        Kont::SWait(v1, v, k) => State::ApplyV(
+            v1.clone(),
+            v.clone(),
+            Some(Kont::BindV(w, k.clone()).into()),
+        ),
     }
 }
 
-pub fn new(t: Term) -> State {
+pub fn new<'a>(t: &'a Term) -> State<'a> {
     State::Eval(t, None)
 }
 
-impl State {
-    pub fn step(self) -> Result<Self, Value> {
+impl<'a> State<'a> {
+    pub fn step(self) -> Result<Self, Rc<Value<'a>>> {
         match self {
             State::Eval(t, k) => Ok(eval(t, k)),
             State::ApplyT(v, t, k) => Ok(apply_t(v, t, k)),
@@ -212,7 +216,7 @@ impl State {
         }
     }
 
-    pub fn run(self) -> Value {
+    pub fn run(self) -> Rc<Value<'a>> {
         let mut state = self;
         loop {
             match state.step() {
@@ -222,4 +226,33 @@ impl State {
         }
     }
     // todo: add a repl
+}
+
+pub fn main(term: Term, interactive: bool) {
+    let state = new(&term);
+
+    if interactive {
+        let mut state = state;
+        println!("{}", state);
+        println!("Press enter to step, or Ctrl-C to exit. `r` to run to completion.");
+        let result = loop {
+            print!("> ");
+            std::io::stdout().flush().unwrap();
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).unwrap();
+            match input.trim() {
+                "r" => break state.run(),
+                _ => (),
+            }
+            match state.step() {
+                Ok(s) => state = s,
+                Err(v) => break v,
+            }
+            println!("{}", state);
+        };
+        println!("-----\nResult:\n{}", result);
+    } else {
+        let result = state.run();
+        println!("Result:\n{}", result);
+    }
 }

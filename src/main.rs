@@ -1,7 +1,6 @@
 pub mod machines;
 pub mod term;
 
-use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -31,32 +30,7 @@ fn main() {
         std::fs::read_to_string(args.file.unwrap()).expect("Could not read file")
     });
 
-    let term = parse_term(program.as_str());
-    println!("Term:\n{}\n", term);
-    let state = machines::acopy::new(term);
-
-    if args.interactive {
-        let mut state = state;
-        println!("{}", state);
-        println!("Press enter to step, or Ctrl-C to exit. `r` to run to completion.");
-        let result = loop {
-            print!("> ");
-            std::io::stdout().flush().unwrap();
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input).unwrap();
-            match input.trim() {
-                "r" => break state.run(),
-                _ => (),
-            }
-            match state.step() {
-                Ok(s) => state = s,
-                Err(v) => break v,
-            }
-            println!("{}", state);
-        };
-        println!("-----\nResult:\n{}", result);
-    } else {
-        let result = state.run();
-        println!("Result:\n{}", result);
-    }
+    let term = parse_term(program.trim());
+    // println!("Term:\n{}\n", term);
+    machines::arc::main(term, args.interactive);
 }
