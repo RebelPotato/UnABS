@@ -48,15 +48,14 @@ fn parse_to_term(pair: pest::iterators::Pair<Rule>) -> Term {
     }
 }
 
-pub fn parse_term(s: &str) -> Term {
-    let parsed = UnParser::parse(Rule::main, s)
-        .expect("parse error")
+pub fn parse_term(s: &str) -> Result<Term, pest::error::Error<Rule>> {
+    let parsed = UnParser::parse(Rule::main, s)?
         .next()
         .unwrap();
     // the term is the second child of the main rule
     let mut pair = parsed.into_inner();
     let term = pair.next().unwrap();
-    parse_to_term(term)
+    Ok(parse_to_term(term))
 }
 
 impl Display for Term {

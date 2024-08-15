@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UnABS Playground</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css"
+    />
+    <link rel="stylesheet" href="playground.css" />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <script type="module" src="playground.js"></script>
+    <script>
+      const names = [
+        "count",
+        "count2",
+        "fibo",
+        "Hello",
+        "pattern",
+        "powers2",
+        "Square",
+        "trivial",
+        "trivial2",
+        "trivial3",
+      ];
+      const programs = {};
+      async function fetchProgram(name) {
+        let response = await fetch(`/CUAN/${name}.unl`);
+        let text = await response.text();
+        programs[name] = text;
+      }
+    </script>
+  </head>
+  <body class="athelas" x-data="{showHelp: false}">
+    <article
+      class="aspect-ratio--object flex justify-center"
+      x-show="showHelp"
+      x-cloak
+      style="background-color: #cccccccc"
+      @click.self="showHelp = false"
+    >
+      <div class="w-80 bg-white overflow-y-auto ph3">
+        <h1 class="lh-headline f1 bg-yellow">Unlambda Playground Help</h1>
+        <h2>What is this?</h2>
+        <p>
+          Playground for the
+          <a href="http://www.madore.org/~david/programs/unlambda/">Unlambda</a>
+          programming language, a functional and esoteric language.
+        </p>
+        <h2>How do I use it?</h2>
+        <h2>What do these glyphs mean?</h2>
+        <h2>Surely you can't write anything meaningful with this...</h2>
+        <button @click="showHelp = false">Alright, I'll have some fun</button>
+      </div>
+    </article>
+    <div class="container f6" x-data="playground">
+      <div class="w-60 h-100 flex flex-column">
+        <div class="mv2 mh1 flex">
+          <span class="f6 lh-copy"><strong>Code</strong></span>
+          <button class="mh2" @click="genTerm">RAND</button>
+          <span class="flex-auto"> </span>
+          <select name="example" id="example" @input="getFile">
+            <option value="local storage">[local storage]</option>
+            <optgroup label="CUAN">
+              <template x-for="name in names">
+                <option x-text="name" :value="name"></option>
+              </template>
+            </optgroup>
+          </select>
+          <button @click="save">Save</button>
+        </div>
+        <textarea
+          class="w-100 courier flex-auto"
+          style="resize: none"
+          x-model="program"
+          @keydown.ctrl.enter="load"
+        ></textarea>
+      </div>
+      <div class="w-40 h-100 flex flex-column ph1">
+        <div class="mv2 flex">
+          <span class="f6 lh-copy"
+            ><button @click="load"><strong>Load</strong></button></span
+          >
+          <span class="w2"></span>
+          <button @click="step">▶️</button>
+          <button @click="step1000">▶️×1000</button>
+          <span class="flex-auto"> </span>
+          <button @click="showHelp = true">⁉️</button>
+        </div>
+        <div class="w-100 flex-auto overflow-y-auto courier">
+          <div class="h-50 overflow-y-auto">
+            <p class="ma0">
+              <strong>State: </strong><span x-text="stateString"></span>
+            </p>
+            <div x-show="valueString" x-cloak>
+              <strong>Value:</strong>
+              <pre x-text="valueString"></pre>
+            </div>
+            <div x-show="termString" x-cloak>
+              <strong>Term:</strong>
+              <pre x-text="termString"></pre>
+            </div>
+            <div x-show="walueString" x-cloak>
+              <strong>Walue:</strong>
+              <pre x-text="walueString"></pre>
+            </div>
+            <div x-show="kontString" x-cloak>
+              <strong>Kont:</strong>
+              <pre x-text="kontString"></pre>
+            </div>
+          </div>
+          <div class="h-50 overflow-y-auto">
+            <p><strong>Output:</strong></p>
+            <pre x-text="outputString"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const stdout = {
+        buffer: [],
+        clear() {
+          this.buffer = [];
+        },
+        write(s) {
+          this.buffer.push(s);
+        },
+      };
+
+      document.addEventListener("alpine:init", () => {
+        Alpine.data("playground", () => ({
+          names: names,
+          program: localStorage.getItem("unabs") || "",
+          state: null,
+          stateString: "Waiting for program...",
+          valueString: null,
+          termString: null,
+          walueString: null,
+          kontString: null,
+          outputString: null,
+          display() {
+            if (this.state === null) {
+              this.stateString = "Waiting for program...";
+              this.kontString = null;
+              this.outputString = null;
+              this.valueString = null;
+              this.termString = null;
+              this.walueString = null;
+              return;
+            }
+            this.stateString = this.state.type;
+            if (this.state.kont) this.kontString = this.state.kont.toString();
+            else this.kontString = "()";
+            switch (this.state.type) {
+              case "Eval": {
+                this.valueString = null;
+                this.termString = `[${this.state.data}]`;
+                this.walueString = null;
+                break;
+              }
+              case "ApplyT": {
+                this.valueString = `${this.state.data[0]}`;
+                this.termString = `[${this.state.data[1]}]`;
+                this.walueString = null;
+                break;
+              }
+              case "ApplyV": {
+                this.valueString = `${this.state.data[0]}`;
+                this.termString = null;
+                this.walueString = `${this.state.data[1]}`;
+                break;
+              }
+              case "ApplyK": {
+                this.valueString = `${this.state.data}`;
+                this.termString = null;
+                this.walueString = null;
+                break;
+              }
+            }
+            this.outputString = stdout.buffer.join("");
+          },
+          getFile(e) {
+            const file = e.target.value;
+            if (file === "local storage") {
+              this.program = localStorage.getItem("unabs") || "";
+              return;
+            }
+            if (programs[file]) {
+              this.program = programs[file];
+              return;
+            }
+            fetchProgram(file).then(() => {
+              this.program = programs[file];
+            });
+          },
+          save() {
+            localStorage.setItem("unabs", this.program);
+          },
+          genTerm() {
+            this.program = randomTerm();
+          },
+          load() {
+            try {
+              let term = parseTerm(this.program);
+              this.state = newState(term, stdout);
+              stdout.clear();
+              this.display();
+            } catch (e) {
+              console.error(e);
+              this.state = null;
+              this.display();
+              return;
+            }
+          },
+          step() {
+            if (this.state === null) {
+              this.load();
+              return;
+            }
+            let next = this.state.step();
+            if (next instanceof State) this.state = next;
+            else {
+              // I don't know, display the value?
+            }
+            this.display();
+          },
+          step1000() {
+            if (this.state === null) {
+              this.load();
+            }
+            let lastCounter = 1;
+            let counter = 1;
+            for (let i = 0; i < 1000; i++) {
+              let next = this.state.step();
+              if (next instanceof State) this.state = next;
+              else break;
+              counter--;
+              if (counter === 0) {
+                counter = lastCounter * 2;
+                lastCounter = counter;
+                this.display();
+              }
+            }
+            this.display();
+          },
+        }));
+      });
+    </script>
+  </body>
+</html>

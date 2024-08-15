@@ -103,7 +103,7 @@ pub enum State<'a> {
     Eval(&'a Term, Option<Rc<Kont<'a>>>),
     ApplyT(Rc<Value<'a>>, &'a Term, Option<Rc<Kont<'a>>>),
     ApplyV(Rc<Value<'a>>, Rc<Value<'a>>, Option<Rc<Kont<'a>>>),
-    ApplyKont(Option<Rc<Kont<'a>>>, Rc<Value<'a>>),
+    ApplyK(Option<Rc<Kont<'a>>>, Rc<Value<'a>>),
 }
 
 impl Display for State<'_> {
@@ -130,8 +130,8 @@ impl Display for State<'_> {
                     Some(k) => write!(f, "Kont: {}", k),
                 }
             }
-            State::ApplyKont(k, v) => {
-                write!(f, "State: ApplyKont\nValue: {}\n", v)?;
+            State::ApplyK(k, v) => {
+                write!(f, "State: ApplyK\nValue: {}\n", v)?;
                 match k.as_ref() {
                     None => write!(f, "Kont: ()"),
                     Some(k) => write!(f, "Kont: {}", k),
@@ -143,43 +143,43 @@ impl Display for State<'_> {
 
 fn eval<'a>(t: &'a Term, k: Option<Rc<Kont<'a>>>) -> State<'a> {
     match t {
-        Term::I => State::ApplyKont(k, Value::I0.into()),
-        Term::S => State::ApplyKont(k, Value::S0.into()),
-        Term::K => State::ApplyKont(k, Value::K0.into()),
-        Term::V => State::ApplyKont(k, Value::V0.into()),
-        Term::D => State::ApplyKont(k, Value::D0.into()),
-        Term::C => State::ApplyKont(k, Value::C0.into()),
-        Term::R => State::ApplyKont(k, Value::Put0('\n').into()),
-        Term::Put(c) => State::ApplyKont(k, Value::Put0(*c).into()),
+        Term::I => State::ApplyK(k, Value::I0.into()),
+        Term::S => State::ApplyK(k, Value::S0.into()),
+        Term::K => State::ApplyK(k, Value::K0.into()),
+        Term::V => State::ApplyK(k, Value::V0.into()),
+        Term::D => State::ApplyK(k, Value::D0.into()),
+        Term::C => State::ApplyK(k, Value::C0.into()),
+        Term::R => State::ApplyK(k, Value::Put0('\n').into()),
+        Term::Put(c) => State::ApplyK(k, Value::Put0(*c).into()),
         Term::App(t0, t1) => State::Eval(t0.as_ref(), Some(Kont::BindT(t1.as_ref(), k).into())),
     }
 }
 
 fn apply_t<'a>(v: Rc<Value<'a>>, t: &'a Term, k: Option<Rc<Kont<'a>>>) -> State<'a> {
     match v.as_ref() {
-        Value::D0 => State::ApplyKont(k, Value::D1T(t).into()),
+        Value::D0 => State::ApplyK(k, Value::D1T(t).into()),
         _ => State::Eval(t, Some(Kont::BindV(v, k).into())),
     }
 }
 
 fn apply_v<'a>(v: Rc<Value<'a>>, w: Rc<Value<'a>>, k: Option<Rc<Kont<'a>>>) -> State<'a> {
     match v.as_ref() {
-        Value::I0 => State::ApplyKont(k, w),
+        Value::I0 => State::ApplyK(k, w),
         Value::Put0(c) => {
             print!("{}", c);
             std::io::stdout().flush().unwrap();
-            State::ApplyKont(k, w)
+            State::ApplyK(k, w)
         }
-        Value::K0 => State::ApplyKont(k, Value::K1(w).into()),
-        Value::K1(w0) => State::ApplyKont(k, w0.clone()),
-        Value::V0 => State::ApplyKont(k, Value::V0.into()),
+        Value::K0 => State::ApplyK(k, Value::K1(w).into()),
+        Value::K1(w0) => State::ApplyK(k, w0.clone()),
+        Value::V0 => State::ApplyK(k, Value::V0.into()),
         Value::C0 => State::ApplyV(w, Value::C1(k.clone()).into(), k),
-        Value::C1(k1) => State::ApplyKont(k1.clone(), w),
-        Value::D0 => State::ApplyKont(k, Value::D1V(w).into()),
+        Value::C1(k1) => State::ApplyK(k1.clone(), w),
+        Value::D0 => State::ApplyK(k, Value::D1V(w).into()),
         Value::D1T(t0) => State::Eval(t0, Some(Kont::BindW(w, k).into())),
         Value::D1V(v0) => State::ApplyV(v0.clone(), w, k),
-        Value::S0 => State::ApplyKont(k, Value::S1(w).into()),
-        Value::S1(v0) => State::ApplyKont(k, Value::S2(v0.clone(), w).into()),
+        Value::S0 => State::ApplyK(k, Value::S1(w).into()),
+        Value::S1(v0) => State::ApplyK(k, Value::S2(v0.clone(), w).into()),
         Value::S2(v0, v1) => State::ApplyV(
             v0.clone(),
             Rc::clone(&w),
@@ -188,7 +188,7 @@ fn apply_v<'a>(v: Rc<Value<'a>>, w: Rc<Value<'a>>, k: Option<Rc<Kont<'a>>>) -> S
     }
 }
 
-fn apply_kont<'a>(k: Rc<Kont<'a>>, w: Rc<Value<'a>>) -> State<'a> {
+fn apply_k<'a>(k: Rc<Kont<'a>>, w: Rc<Value<'a>>) -> State<'a> {
     match k.as_ref() {
         Kont::BindT(t, k) => State::ApplyT(w, t, k.clone()),
         Kont::BindV(v, k) => State::ApplyV(v.clone(), w, k.clone()),
@@ -211,8 +211,8 @@ impl<'a> State<'a> {
             State::Eval(t, k) => Ok(eval(t, k)),
             State::ApplyT(v, t, k) => Ok(apply_t(v, t, k)),
             State::ApplyV(v, w, k) => Ok(apply_v(v, w, k)),
-            State::ApplyKont(Some(k), w) => Ok(apply_kont(k, w)),
-            State::ApplyKont(None, v) => Err(v),
+            State::ApplyK(Some(k), w) => Ok(apply_k(k, w)),
+            State::ApplyK(None, v) => Err(v),
         }
     }
 

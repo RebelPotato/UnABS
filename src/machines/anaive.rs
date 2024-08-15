@@ -102,7 +102,7 @@ pub enum State {
     Eval(Term, Option<Kont>),
     ApplyT(Value, Term, Option<Kont>),
     ApplyV(Value, Value, Option<Kont>),
-    ApplyKont(Option<Kont>, Value),
+    ApplyK(Option<Kont>, Value),
 }
 
 impl Display for State {
@@ -129,8 +129,8 @@ impl Display for State {
                     Some(k) => write!(f, "Kont: {}", k),
                 }
             }
-            State::ApplyKont(k, v) => {
-                write!(f, "State: ApplyKont\nValue: {}\n", v)?;
+            State::ApplyK(k, v) => {
+                write!(f, "State: ApplyK\nValue: {}\n", v)?;
                 match k {
                     None => write!(f, "Kont: ()"),
                     Some(k) => write!(f, "Kont: {}", k),
@@ -142,44 +142,44 @@ impl Display for State {
 
 fn eval(t: Term, k: Option<Kont>) -> State {
     match t {
-        Term::I => State::ApplyKont(k, Value::I0),
-        Term::S => State::ApplyKont(k, Value::S0),
-        Term::K => State::ApplyKont(k, Value::K0),
-        Term::V => State::ApplyKont(k, Value::V0),
-        Term::D => State::ApplyKont(k, Value::D0),
-        Term::C => State::ApplyKont(k, Value::C0),
-        Term::R => State::ApplyKont(k, Value::Put0('\n')),
-        Term::Put(c) => State::ApplyKont(k, Value::Put0(c)),
+        Term::I => State::ApplyK(k, Value::I0),
+        Term::S => State::ApplyK(k, Value::S0),
+        Term::K => State::ApplyK(k, Value::K0),
+        Term::V => State::ApplyK(k, Value::V0),
+        Term::D => State::ApplyK(k, Value::D0),
+        Term::C => State::ApplyK(k, Value::C0),
+        Term::R => State::ApplyK(k, Value::Put0('\n')),
+        Term::Put(c) => State::ApplyK(k, Value::Put0(c)),
         Term::App(t0, t1) => State::Eval(*t0, Some(Kont::BindT(t1, Box::new(k)))),
     }
 }
 
 fn apply_t(v: Value, t: Term, k: Option<Kont>) -> State {
     match v {
-        Value::D0 => State::ApplyKont(k, Value::D1T(Box::new(t))),
+        Value::D0 => State::ApplyK(k, Value::D1T(Box::new(t))),
         _ => State::Eval(t, Some(Kont::BindV(Box::new(v), Box::new(k)))),
     }
 }
 
 fn apply_v(v: Value, w: Value, k: Option<Kont>) -> State {
     match v {
-        Value::I0 => State::ApplyKont(k, w),
+        Value::I0 => State::ApplyK(k, w),
         Value::Put0(c) => {
             print!("{}", c);
             std::io::stdout().flush().unwrap();
-            State::ApplyKont(k, w)
+            State::ApplyK(k, w)
         }
-        Value::K0 => State::ApplyKont(k, Value::K1(Box::new(w))),
-        Value::K1(w0) => State::ApplyKont(k, *w0),
-        Value::V0 => State::ApplyKont(k, Value::V0),
+        Value::K0 => State::ApplyK(k, Value::K1(Box::new(w))),
+        Value::K1(w0) => State::ApplyK(k, *w0),
+        Value::V0 => State::ApplyK(k, Value::V0),
         // This clones the kontinuation. How can we avoid this?
         Value::C0 => State::ApplyV(w, Value::C1(Box::new(k.clone())), k),
-        Value::C1(k1) => State::ApplyKont(*k1, w),
-        Value::D0 => State::ApplyKont(k, Value::D1V(Box::new(w))),
+        Value::C1(k1) => State::ApplyK(*k1, w),
+        Value::D0 => State::ApplyK(k, Value::D1V(Box::new(w))),
         Value::D1T(t0) => State::Eval(*t0, Some(Kont::BindW(Box::new(w), Box::new(k)))),
         Value::D1V(v0) => State::ApplyV(*v0, w, k),
-        Value::S0 => State::ApplyKont(k, Value::S1(Box::new(w))),
-        Value::S1(v0) => State::ApplyKont(k, Value::S2(v0, Box::new(w))),
+        Value::S0 => State::ApplyK(k, Value::S1(Box::new(w))),
+        Value::S1(v0) => State::ApplyK(k, Value::S2(v0, Box::new(w))),
         Value::S2(v0, v1) => {
             // This copys the third value. A tree clone! Very inefficient.
             // How do we share? Rc? Cow? Make a flat list or something?
@@ -188,7 +188,7 @@ fn apply_v(v: Value, w: Value, k: Option<Kont>) -> State {
     }
 }
 
-fn apply_kont(k: Kont, w: Value) -> State {
+fn apply_k(k: Kont, w: Value) -> State {
     match k {
         Kont::BindT(t, k) => State::ApplyT(w, *t, *k),
         Kont::BindV(v, k) => State::ApplyV(*v, w, *k),
@@ -207,8 +207,8 @@ impl State {
             State::Eval(t, k) => Ok(eval(t, k)),
             State::ApplyT(v, t, k) => Ok(apply_t(v, t, k)),
             State::ApplyV(v, w, k) => Ok(apply_v(v, w, k)),
-            State::ApplyKont(Some(k), w) => Ok(apply_kont(k, w)),
-            State::ApplyKont(None, v) => Err(v),
+            State::ApplyK(Some(k), w) => Ok(apply_k(k, w)),
+            State::ApplyK(None, v) => Err(v),
         }
     }
 
