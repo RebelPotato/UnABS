@@ -8,7 +8,6 @@
       rel="stylesheet"
       href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css"
     />
-    <link rel="stylesheet" href="playground.css" />
     <script
       defer
       src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
@@ -35,7 +34,7 @@
       }
     </script>
   </head>
-  <body class="athelas" x-data="{showHelp: false}">
+  <body class="athelas" x-data="playground">
     <article
       class="aspect-ratio--object flex justify-center"
       x-show="showHelp"
@@ -43,22 +42,192 @@
       style="background-color: #cccccccc"
       @click.self="showHelp = false"
     >
-      <div class="w-80 bg-white overflow-y-auto ph3">
-        <h1 class="lh-headline f1 bg-yellow">Unlambda Playground Help</h1>
-        <h2>What is this?</h2>
-        <p>
-          Playground for the
-          <a href="http://www.madore.org/~david/programs/unlambda/">Unlambda</a>
-          programming language, a functional and esoteric language.
-        </p>
-        <h2>How do I use it?</h2>
-        <h2>What do these glyphs mean?</h2>
-        <h2>Surely you can't write anything meaningful with this...</h2>
+      <div class="w-70 bg-white overflow-y-auto ph3 f5 lh-copy">
+        <h1 class="lh-title f-headline">
+          <span class="bg-yellow">A Guide to Unlambda</span><br>
+          <span class="bg-yellow">for the perplexed</span>
+        </h1>
+        <section>
+          <h2>What is this?</h2>
+          <p>
+            This page is a playground for the
+            <a href="http://www.madore.org/~david/programs/unlambda/">Unlambda</a>
+            programming language, the original Obfuscated and functional (i.e.
+            esoteric) language based on
+            <a href="https://en.wikipedia.org/wiki/Combinatory_logic#Combinatory_calculi">Combinatory logic</a>.
+          </p>
+        </section>
+        <section>  
+          <h2>How do I use it?</h2>
+          <p>
+            The left panel is for entering your program. You can save your program
+            using the
+            <button
+              x-data="{disabled: true}"
+              @click="save"
+              :disabled="disabled"
+              x-init="$watch('program', str => disabled = str === localStorage.getItem(`unabs`))"
+            >
+              Save
+            </button>
+            button (should be disabled if you've saved it) or load an existing program using the program selector.
+          </p>
+          <p>
+            Alternatively, if you're feeling particularly lazy, press
+            <button @click="genTerm">RAND</button> repeatedly until you get a
+            program you want.
+          </p>
+          <p>
+            After that, press
+            <button @click="load">
+              <strong>Load</strong>
+            </button>
+            to load your program into the machine and press <button @click="step">▶️</button>
+            to step through the execution.
+          </p>
+        </section>
+        <section>
+          <h2>What are these glyphs in my program?</h2>
+          <p>
+            Unlambda is a functional programming language. By this, I mean that 
+            <span class="bg-yellow">every value in Unlambda is a function</span>.
+            Therefore, the only operation is apply <code class="bg-lightest-blue br2 ph1">`</code>,
+            which applies a function to its argument. Also each function has only one argument,
+            and we represent a multiple argument function by "currying". (You'll understand when you see it.)
+          </p>
+          <p>
+            The simplest function is <code class="bg-lightest-blue br2 ph1">i</code> for identity. 
+            The identity function just returns its argument verbatim. We can express its meaning as:
+          </p>
+          <pre class="tc"><code class="bg-lightest-blue br2 ph2">`iX = X</code></pre>
+          <p>
+            Of course, allowing you to express a function as such would make programming a breeze.
+            But we unlambda programmers value composition over inheritance, and allowing one definition
+            to change another function's meaning is too fragile! That's why Unlambda defines it
+            as a "built-in" function, and we define any other function we in terms of it.
+          </p>
+          <p>
+            Of course, we need to throw away values or create values to do anything useful (so to speak).
+            To do this, we introduce <code class="bg-lightest-blue br2 ph1">k</code>
+            and <code class="bg-lightest-blue br2 ph1">s</code>, where:
+          </p>
+          <pre class="tc"><code class="bg-lightest-blue br2 ph2">``kXY = X</code></pre>
+          <p>and:</p>
+          <pre class="tc"><code class="bg-lightest-blue br2 ph2">```sXYZ = ``XZ`YZ</code></pre>
+          <p>
+            Notably, our language is already <span class="bg-yellow">Turing complete</span>. In fact, we
+            can translate any lambda calculus expression into Unlambda, and vice versa! We shall see how 
+            to do this in a minute.
+          </p>
+          <p>
+            Right now Unlambda is nothing but a glorified hand warmer. To actually have (unleash)
+            an effect on the world, Unlambda provides <code class="bg-lightest-blue br2 ph1">r</code>
+            and <code class="bg-lightest-blue br2 ph1">.&lt;char&gt;</code> which acts as an identity
+            function, but prints a newline("\n") or a character to an output stream.
+          </p>
+          <pre class="tc"><code class="bg-lightest-blue br2 ph2">`rX = X</code> (after printing "\n")</pre>
+          <pre class="tc"><code class="bg-lightest-blue br2 ph2">`.&lt;char&gt;X = X</code> (after printing "&lt;char&gt;")</pre>
+          <p>
+            For extra confusion, Unlambda also has a couple more combinators 
+            (<code class="bg-lightest-blue br2 ph1">d,c,v</code>) that are a tad more complicated
+            and we will cover them later.
+          </p>
+        </section>
+        <section>
+          <h2>And what's with the State/Term/Value/Walue/Kont?</h2>
+          <p>This playground is a revolution in Unlambda technology. A program stepper in the browser!</p>
+          <p>
+            This works by transforming the Unlambda evaluator into an abstract machine 
+            (to be described in another article) and implementing it in javascript (and also in rust).
+            An abstract machine is basically:
+          </p>
+          <ul>
+            <li>a way to transform a program into a "state"</li>
+            <li>and a function turning one state to another</li>
+          </ul>
+          <p>
+            Executing a program is then just a matter of transforming the program, stepping through the states
+            until we cannot go any further, and finally extracting the return value from the final state.
+          </p>
+          <p>
+            For this machine, each state has a clear meaning. There are four kinds of states in total, but
+            every one of them has a <strong>Continuation</strong> (<strong>Kont</strong> for short). This value
+            represents <span class="bg-yellow">the remaining computation</span> to be done after the current state
+            is finished. It is represented by a program with a hole (), where the value returned from the current
+            state is to be inserted. It can also contain unevaluated terms, which are wrapped by a pair of square
+            brackets []. For example:
+          </p>
+          <pre class="tc"><code class="bg-lightest-blue br2 ph2">``s``s`ks()[i]</code></pre>
+          <p>
+            This continuation means that: after the current value resolves 
+            (for example to <code class="bg-lightest-blue br2 ph1">k</code>),
+            evaluate <code class="bg-lightest-blue br2 ph1">i</code>
+            (the continuation will be <code class="bg-lightest-blue br2 ph2">``s``s`ksk()</code> when this happens),
+            plug it back in, and return it (<code class="bg-lightest-blue br2 ph2">``s``s`kski</code>)
+            as the result.
+          </p>
+          <p>
+            Every computation has a continuation, the stepper just makes it explicit.
+          </p>
+          <p>
+            Okay, so here are the four states of this machine:
+          </p>
+          <ul>
+            <li>
+              <strong class="bg-dark-green light-yellow ph1">Eval(Term)</strong>
+              evaluates a term and returns its value.
+            </li>
+            <li>
+              <strong class="bg-dark-green light-yellow ph1">ApplyT(Value, Term)</strong>
+              applies a value to a term and returns the result.
+              (Spoiler: we need this step because of the <code class="bg-lightest-blue br2 ph1">d</code> operator)
+            </li>
+            <li>
+              <strong class="bg-dark-green light-yellow ph1">ApplyV(Value, Walue)</strong>
+              applies a value to a walue <span class="f6">(I know, I'm bad at naming)</span> and returns the result.
+            </li>
+            <li>
+              <strong class="bg-dark-green light-yellow ph1">ApplyK(Value)</strong>
+              stuffs a value in the current continuation, and decides which term/value to evaluate next.
+            </li>
+          </ul>
+          <p>
+            To list out the transformation rules is as tedious as writing the code for the machine itself,
+            so for exactly how these states transform between each other, just go read the source code.
+            (I may describe how I arrived at this machine in another article.)
+          </p>
+          <p>
+            Luckily you don't need to understand this to understand Unlambda. The meaning of a program
+            can be derived using rewrite rules, and the machine is just a way to execute the program.
+            But stepping does make debugging a bit easier.
+          </p>
+        </section>
+        <section>
+          <h2>Surely you can't write anything meaningful with this...</h2>
+          <p>
+            Now back to the language. Is a language without variables pointless (point-free, ha)?
+            Definitely not. We can always program in another imaginary language and compile that
+            program to Unlambda.
+          </p>
+          <p>
+            It is nothing short of a miracle that the lambda calculus can be translated into
+            Unlambda using simple rules.
+          </p>
+        </section>
+        <section>
+          <h2>
+            Wait you only talked about <code class="bg-lightest-blue br2 ph1">`ski</code>,
+            what about the others?
+          </h2>
+          <p>You've probably noticed that the continuation looks like a function.</p>
+          <p>We mentioned Unlambda being a Strict language.</p>
+          <p>For convenience, we define v.</p>
+        </section>
         <button @click="showHelp = false">Alright, I'll have some fun</button>
       </div>
     </article>
-    <div class="container f6" x-data="playground">
-      <div class="w-60 h-100 flex flex-column">
+    <div class="flex justify-center items-center vh-100 overflow-hidden f6">
+      <div class="w-60 h-100 flex flex-column mr3">
         <div class="mv2 mh1 flex">
           <span class="f6 lh-copy"><strong>Code</strong></span>
           <button class="mh2" @click="genTerm">RAND</button>
@@ -71,7 +240,14 @@
               </template>
             </optgroup>
           </select>
-          <button @click="save">Save</button>
+          <button
+            x-data="{disabled: true}"
+            @click="save"
+            :disabled="disabled"
+            x-init="$watch('program', str => disabled = str === localStorage.getItem(`unabs`))"
+          >
+            Save
+          </button>
         </div>
         <textarea
           class="w-100 courier flex-auto"
@@ -82,9 +258,9 @@
       </div>
       <div class="w-40 h-100 flex flex-column ph1">
         <div class="mv2 flex">
-          <span class="f6 lh-copy"
-            ><button @click="load"><strong>Load</strong></button></span
-          >
+          <button class="f6 lh-copy" @click="load">
+            <strong>Load</strong>
+          </button>
           <span class="w2"></span>
           <button @click="step">▶️</button>
           <button @click="step1000">▶️×1000</button>
@@ -133,6 +309,7 @@
 
       document.addEventListener("alpine:init", () => {
         Alpine.data("playground", () => ({
+          showHelp: true,
           names: names,
           program: localStorage.getItem("unabs") || "",
           state: null,
