@@ -32,6 +32,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let term = parse_term(program.trim())?;
     // println!("Term:\n{}\n", term);
-    machines::arc::main(term, args.interactive);
+    machines::anaive::main(term, args.interactive);
     Ok(())
 }

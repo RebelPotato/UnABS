@@ -61,37 +61,22 @@ pub enum Kont {
 }
 impl Display for Kont {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Kont::BindT(t, k) => {
-                write!(f, "BindT({})", t)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
+        let mut wrapped = "()".to_string();
+        let mut current = self;
+        loop {
+            let (next, text) = match current {
+                Kont::BindT(t, k) => (k, format!("`{}[{}]", wrapped, t)),
+                Kont::BindV(v, k) => (k, format!("`{}{}", v, wrapped)),
+                Kont::BindW(w, k) => (k, format!("`{}{}", wrapped, w)),
+                Kont::SWait(v1, v, k) => (k, format!("`{}`{}{}", wrapped, v1, v)),
+            };
+            match next.as_ref() {
+                Some(k) => {
+                    wrapped = text;
+                    current = k;
                 }
-            }
-            Kont::BindV(v, k) => {
-                write!(f, "BindV({})", v)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
-                }
-            }
-            Kont::BindW(w, k) => {
-                write!(f, "BindW({})", w)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
-                }
-            }
-            Kont::SWait(w0, w1, k) => {
-                write!(f, "SWait({}; {})", w0, w1)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
+                None => {
+                    return write!(f, "{}", text);
                 }
             }
         }

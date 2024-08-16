@@ -3,6 +3,7 @@ use std::char;
 use std::fmt::Display;
 use std::io::Write;
 use std::rc::Rc;
+use std::mem::take;
 
 // A sharing abstract machine for unlambda
 // I hope this runs f..a..s..t..
@@ -62,166 +63,267 @@ pub enum Kont<'a> {
 }
 impl Display for Kont<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Kont::BindT(t, k) => {
-                write!(f, "BindT({})", t)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
+        let mut wrapped = "()".to_string();
+        let mut current = self;
+        loop {
+            let (next, text) = match current {
+                Kont::BindT(t, k) => (k, format!("`{}[{}]", wrapped, t)),
+                Kont::BindV(v, k) => (k, format!("`{}{}", v, wrapped)),
+                Kont::BindW(w, k) => (k, format!("`{}{}", wrapped, w)),
+                Kont::SWait(v1, v, k) => (k, format!("`{}`{}{}", wrapped, v1, v)),
+            };
+            match next.as_ref() {
+                Some(k) => {
+                    wrapped = text;
+                    current = k;
                 }
-            }
-            Kont::BindV(v, k) => {
-                write!(f, "BindV({})", v)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
-                }
-            }
-            Kont::BindW(w, k) => {
-                write!(f, "BindW({})", w)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
-                }
-            }
-            Kont::SWait(w0, w1, k) => {
-                write!(f, "SWait({}; {})", w0, w1)?;
-                if let Some(k) = k.as_ref() {
-                    write!(f, " {}", k)
-                } else {
-                    write!(f, "")
+                None => {
+                    return write!(f, "{}", text);
                 }
             }
         }
     }
 }
 
-pub enum State<'a> {
-    Eval(&'a Term, Option<Rc<Kont<'a>>>),
-    ApplyT(Rc<Value<'a>>, &'a Term, Option<Rc<Kont<'a>>>),
-    ApplyV(Rc<Value<'a>>, Rc<Value<'a>>, Option<Rc<Kont<'a>>>),
-    ApplyK(Option<Rc<Kont<'a>>>, Rc<Value<'a>>),
+#[derive(Debug, Clone, PartialEq)]
+pub enum StateFlag {
+    Eval,
+    ApplyT,
+    ApplyV,
+    ApplyK,
+}
+
+#[derive(Debug, Clone)]
+pub struct State<'a> {
+    flag: StateFlag,
+    t: Option<&'a Term>, // this may bite me in the ass later
+    v: Option<Rc<Value<'a>>>,
+    w: Option<Rc<Value<'a>>>,
+    k: Option<Rc<Kont<'a>>>,
 }
 
 impl Display for State<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            State::Eval(t, k) => {
-                write!(f, "State: Eval\nTerm: [{}]\n", t)?;
-                match k {
-                    None => write!(f, "Kont: ()"),
-                    Some(k) => write!(f, "Kont: {}", k),
-                }
+        match self.flag {
+            StateFlag::Eval => {
+                write!(f, "State: Eval\n")?;
             }
-            State::ApplyT(v, t, k) => {
-                write!(f, "State: ApplyT\nValue: {}\nTerm: [{}]\n", v, t)?;
-                match k {
-                    None => write!(f, "Kont: ()"),
-                    Some(k) => write!(f, "Kont: {}", k),
-                }
+            StateFlag::ApplyT => {
+                write!(f, "State: ApplyT\n")?;
             }
-            State::ApplyV(v, w, k) => {
-                write!(f, "State: ApplyV\nValue: {}\nWalue: {}\n", v, w)?;
-                match k {
-                    None => write!(f, "Kont: ()"),
-                    Some(k) => write!(f, "Kont: {}", k),
-                }
+            StateFlag::ApplyV => {
+                write!(f, "State: ApplyV\n")?;
             }
-            State::ApplyK(k, v) => {
-                write!(f, "State: ApplyK\nValue: {}\n", v)?;
-                match k.as_ref() {
-                    None => write!(f, "Kont: ()"),
-                    Some(k) => write!(f, "Kont: {}", k),
-                }
+            StateFlag::ApplyK => {
+                write!(f, "State: ApplyK\n")?;
             }
+        }
+        if let Some(v) = &self.v {
+            write!(f, "Value: {}\n", v)?;
+        }
+        if let Some(t) = &self.t {
+            write!(f, "Term: [{}]\n", t)?;
+        }
+        if let Some(w) = &self.w {
+            write!(f, "Walue: {}\n", w)?;
+        }
+        match &self.k {
+            None => write!(f, "Kont: ()"),
+            Some(k) => write!(f, "Kont: {}", k),
         }
     }
 }
 
-fn eval<'a>(t: &'a Term, k: Option<Rc<Kont<'a>>>) -> State<'a> {
+fn eval<'a>(state: &mut State<'a>) {
+    let t = state.t.unwrap();
     match t {
-        Term::I => State::ApplyK(k, Value::I0.into()),
-        Term::S => State::ApplyK(k, Value::S0.into()),
-        Term::K => State::ApplyK(k, Value::K0.into()),
-        Term::V => State::ApplyK(k, Value::V0.into()),
-        Term::D => State::ApplyK(k, Value::D0.into()),
-        Term::C => State::ApplyK(k, Value::C0.into()),
-        Term::R => State::ApplyK(k, Value::Put0('\n').into()),
-        Term::Put(c) => State::ApplyK(k, Value::Put0(*c).into()),
-        Term::App(t0, t1) => State::Eval(t0.as_ref(), Some(Kont::BindT(t1.as_ref(), k).into())),
+        Term::I => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::I0));
+        }
+        Term::S => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::S0));
+        }
+        Term::K => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::K0));
+        }
+        Term::V => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::V0));
+        }
+        Term::D => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::D0));
+        }
+        Term::C => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::C0));
+        }
+        Term::R => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::Put0('\n')));
+        }
+        Term::Put(c) => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::Put0(*c)));
+        }
+        Term::App(t0, t1) => {
+            // State::Eval(t0, Some(Rc::new(Kont::BindT(t1, k.take()))))
+            state.t = Some(t0);
+            state.k = Some(Rc::new(Kont::BindT(t1, take(&mut state.k))));
+        }
+    };
+}
+
+fn apply_t<'a>(state: &mut State<'a>) {
+    let v = take(&mut state.v).unwrap();
+    // safe because clause1 has a value for v and clause2 gives a value to v
+    match v.as_ref() {
+        Value::D0 => {
+            let t = state.t.unwrap();
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::D1T(t)));
+        }
+        _ => {
+            state.flag = StateFlag::Eval;
+            state.k = Some(Rc::new(Kont::BindV(v, take(&mut state.k))));
+        }
     }
 }
 
-fn apply_t<'a>(v: Rc<Value<'a>>, t: &'a Term, k: Option<Rc<Kont<'a>>>) -> State<'a> {
+fn apply_v<'a>(state: &mut State<'a>) {
+    let v = take(&mut state.v).unwrap();
+    let w = take(&mut state.w).unwrap();
     match v.as_ref() {
-        Value::D0 => State::ApplyK(k, Value::D1T(t).into()),
-        _ => State::Eval(t, Some(Kont::BindV(v, k).into())),
-    }
-}
-
-fn apply_v<'a>(v: Rc<Value<'a>>, w: Rc<Value<'a>>, k: Option<Rc<Kont<'a>>>) -> State<'a> {
-    match v.as_ref() {
-        Value::I0 => State::ApplyK(k, w),
+        Value::I0 => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(w);
+        }
         Value::Put0(c) => {
             print!("{}", c);
             std::io::stdout().flush().unwrap();
-            State::ApplyK(k, w)
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(w);
         }
-        Value::K0 => State::ApplyK(k, Value::K1(w).into()),
-        Value::K1(w0) => State::ApplyK(k, w0.clone()),
-        Value::V0 => State::ApplyK(k, Value::V0.into()),
-        Value::C0 => State::ApplyV(w, Value::C1(k.clone()).into(), k),
-        Value::C1(k1) => State::ApplyK(k1.clone(), w),
-        Value::D0 => State::ApplyK(k, Value::D1V(w).into()),
-        Value::D1T(t0) => State::Eval(t0, Some(Kont::BindW(w, k).into())),
-        Value::D1V(v0) => State::ApplyV(v0.clone(), w, k),
-        Value::S0 => State::ApplyK(k, Value::S1(w).into()),
-        Value::S1(v0) => State::ApplyK(k, Value::S2(v0.clone(), w).into()),
-        Value::S2(v0, v1) => State::ApplyV(
-            v0.clone(),
-            Rc::clone(&w),
-            Some(Kont::SWait(v1.clone(), w, k).into()),
-        ),
-    }
+        Value::K0 => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::K1(w)));
+        }
+        Value::K1(w0) => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(w0.clone());
+        }
+        Value::V0 => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(v);
+        }
+        Value::C0 => {
+            state.v = Some(w);
+            state.w = Some(Rc::new(Value::C1(state.k.clone())));
+        }
+        Value::C1(k1) => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(w);
+            state.k = k1.clone();
+        }
+        Value::D0 => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::D1V(w)));
+        }
+        Value::D1T(t0) => {
+            state.flag = StateFlag::Eval;
+            state.t = Some(t0);
+            state.k = Some(Rc::new(Kont::BindW(w, take(&mut state.k))));
+        }
+        Value::D1V(v0) => {
+            state.v = Some(v0.clone());
+            state.w = Some(w);
+        }
+        Value::S0 => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::S1(w)));
+        }
+        Value::S1(v0) => {
+            state.flag = StateFlag::ApplyK;
+            state.v = Some(Rc::new(Value::S2(v0.clone(), w)));
+        }
+        Value::S2(v0, v1) => {
+            state.v = Some(v0.clone());
+            state.w = Some(w.clone());
+            state.k = Some(Rc::new(Kont::SWait(v1.clone(), w, take(&mut state.k))));
+        }
+    };
 }
 
-fn apply_k<'a>(k: Rc<Kont<'a>>, w: Rc<Value<'a>>) -> State<'a> {
-    match k.as_ref() {
-        Kont::BindT(t, k) => State::ApplyT(w, t, k.clone()),
-        Kont::BindV(v, k) => State::ApplyV(v.clone(), w, k.clone()),
-        Kont::BindW(w1, k) => State::ApplyV(w, w1.clone(), k.clone()),
-        Kont::SWait(v1, v, k) => State::ApplyV(
-            v1.clone(),
-            v.clone(),
-            Some(Kont::BindV(w, k.clone()).into()),
-        ),
+fn apply_k<'a>(state: &mut State<'a>) {
+    let k = state.k.take();
+    match k {
+        Some(k) => match k.as_ref() {
+            Kont::BindT(t, k) => {
+                state.flag = StateFlag::ApplyT;
+                state.t = Some(t);
+                state.k = k.clone();
+            }
+            Kont::BindV(v, k) => {
+                let w = take(&mut state.v).unwrap();
+                state.flag = StateFlag::ApplyV;
+                state.v = Some(v.clone());
+                state.w = Some(w);
+                state.k = k.clone();
+            }
+            Kont::BindW(w1, k) => {
+                state.flag = StateFlag::ApplyV;
+                state.w = Some(w1.clone());
+                state.k = k.clone();
+            }
+            Kont::SWait(v1, v, k) => {
+                let w = take(&mut state.v).unwrap();
+                state.flag = StateFlag::ApplyV;
+                state.v = Some(v1.clone());
+                state.w = Some(v.clone());
+                state.k = Some(Rc::new(Kont::BindV(w, k.clone())));
+            }
+        },
+        None => ()
     }
 }
 
 pub fn new<'a>(t: &'a Term) -> State<'a> {
-    State::Eval(t, None)
+    State {
+        flag: StateFlag::Eval,
+        t: Some(t),
+        v: None,
+        w: None,
+        k: None,
+    }
 }
 
 impl<'a> State<'a> {
-    pub fn step(self) -> Result<Self, Rc<Value<'a>>> {
-        match self {
-            State::Eval(t, k) => Ok(eval(t, k)),
-            State::ApplyT(v, t, k) => Ok(apply_t(v, t, k)),
-            State::ApplyV(v, w, k) => Ok(apply_v(v, w, k)),
-            State::ApplyK(Some(k), w) => Ok(apply_k(k, w)),
-            State::ApplyK(None, v) => Err(v),
+    pub fn step(&mut self) {
+        match self.flag {
+            StateFlag::Eval => eval(self),
+            StateFlag::ApplyT => apply_t(self),
+            StateFlag::ApplyV => apply_v(self),
+            StateFlag::ApplyK => apply_k(self)
+        }
+    }
+
+    pub fn extract(&self) -> Option<Rc<Value<'a>>> {
+        if self.flag == StateFlag::ApplyK && self.k.is_none() {
+            self.v.clone()
+        } else {
+            None
         }
     }
 
     pub fn run(self) -> Rc<Value<'a>> {
         let mut state = self;
         loop {
-            match state.step() {
-                Ok(s) => state = s,
-                Err(v) => return v,
+            state.step();
+            if let Some(v) = state.extract() {
+                return v;
             }
         }
     }
@@ -244,9 +346,9 @@ pub fn main(term: Term, interactive: bool) {
                 "r" => break state.run(),
                 _ => (),
             }
-            match state.step() {
-                Ok(s) => state = s,
-                Err(v) => break v,
+            state.step();
+            if let Some(v) = state.extract() {
+                break v;
             }
             println!("{}", state);
         };
