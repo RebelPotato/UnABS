@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UnABS Playground</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css"
+    />
+  </head>
+  <body class="athelas mt3 mh4 bg-washed-green" x-data="playground">
+    <article class="w-70-l w-80-m w-90 bg-white overflow-y-auto ph3 f5 lh-copy">
+      <!-- Guide sent from /guide/index.html -->
+      <h1 class="lh-title f-headline-l f1">
+        <span class="bg-yellow">A Guide to Unlambda</span><br />
+        <span class="bg-yellow">for the perplexed</span>
+      </h1>
+      <section>
+        <h2>What is this?</h2>
+        <p>
+          This page is a playground for the
+          <a href="http://www.madore.org/~david/programs/unlambda/">Unlambda</a>
+          programming language, the original obfuscated and functional (i.e.
+          esoteric) programming language based on
+          <a
+            href="https://en.wikipedia.org/wiki/Combinatory_logic#Combinatory_calculi"
+            >Combinatory logic</a
+          >.
+        </p>
+      </section>
+      <section>
+        <h2>How do I use it?</h2>
+        <p>
+          The left panel is for entering your program. You can save your program
+          using the
+          <button
+            x-data="{disabled: true}"
+            @click="save(); disabled = true"
+            :disabled="disabled"
+            x-init="$watch('program', str => disabled = str == localStorage.getItem(`unabs`))"
+          >
+            Save
+          </button>
+          button (should be disabled if you've saved it) or load an existing
+          program using the program selector.
+        </p>
+        <p>
+          Alternatively, if you're feeling particularly lazy, press
+          <button @click="genTerm">RAND</button> repeatedly until you get a
+          program you want.
+        </p>
+        <p>
+          After that, press
+          <button @click="load">
+            <strong>Load</strong>
+          </button>
+          to load your program into the machine and press
+          <button @click="step">▶️</button>
+          to step through the execution. If you skipped over a state you want to
+          inspect, just load your program and step to that state again. Not for
+          the faint-hearted!
+        </p>
+      </section>
+      <section>
+        <h2>What are these glyphs in my program?</h2>
+        <p>
+          Unlambda is a functional programming language. By this, I mean that
+          <span class="bg-yellow">every value in Unlambda is a function</span>.
+          Therefore, the only operation is apply
+          <code class="bg-lightest-blue br2 ph1">`</code>, which applies a
+          function to its argument. Also each function has only one argument,
+          and we represent a multiple argument function by "currying". (You'll
+          understand when you see it.)
+        </p>
+        <p>
+          The simplest function is
+          <code class="bg-lightest-blue br2 ph1">i</code> for identity. The
+          identity function just returns its argument verbatim. We can express
+          its meaning as:
+        </p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">`iX = X</code></pre>
+        <p>
+          Of course, allowing you to express a function as such would make
+          programming a breeze. But we unlambda programmers value composition
+          over inheritance, and allowing one function to influence another
+          function's meaning is too fragile! That's why Unlambda defines it as a
+          "built-in" function, and we define any other function in terms of it.
+        </p>
+        <p>
+          Of course, we need to throw away values or create values to do
+          anything useful (so to speak). To do this, we introduce
+          <code class="bg-lightest-blue br2 ph1">k</code> and
+          <code class="bg-lightest-blue br2 ph1">s</code>, where:
+        </p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">``kXY = X</code></pre>
+        <p>and:</p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">```sXYZ = ``XZ`YZ</code></pre>
+        <p>
+          Notably, our language is already
+          <span class="bg-yellow">Turing complete</span>. In fact, we can
+          translate any lambda calculus expression into Unlambda! We shall see
+          how to do this in a minute.
+        </p>
+        <p>
+          Right now Unlambda is nothing but a glorified hand warmer. To actually
+          have (read: unleash) an effect on the world, Unlambda provides
+          <code class="bg-lightest-blue br2 ph1">r</code> and
+          <code class="bg-lightest-blue br2 ph1">.&lt;char&gt;</code> which acts
+          as an identity function, but prints a newline("\n") or a character to
+          an output stream.
+        </p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">`rX = X</code> (after printing "\n")</pre>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">`.&lt;char&gt;X = X</code> (after printing "&lt;char&gt;")</pre>
+        <p>
+          For extra confusion, Unlambda also has a couple more combinators
+          (<code class="bg-lightest-blue br2 ph1">d,c,v</code>) that are a tad
+          more complicated and we will cover them later.
+        </p>
+      </section>
+      <section>
+        <h2>And what's with the State/Term/Value/Walue/Kont?</h2>
+        <p>
+          This playground is a revolution in Unlambda technology. A program
+          stepper in the browser!
+        </p>
+        <p>
+          This works by transforming the Unlambda evaluator into an abstract
+          machine (to be described in another article) and implementing it in
+          javascript (and also in rust). An abstract machine is basically:
+        </p>
+        <ul>
+          <li>a way to transform a program into a "state"</li>
+          <li>and a function turning one state to another</li>
+        </ul>
+        <p>
+          Executing a program is then just a matter of transforming the program,
+          stepping through the states until we cannot go any further, and
+          finally extracting the return value from the final state.
+        </p>
+        <p>
+          For this machine, each state has a clear meaning. There are four kinds
+          of states in total, but every one of them has a
+          <strong>Continuation</strong> (<strong>Kont</strong> for short). This
+          value represents
+          <span class="bg-yellow">the remaining computation</span> to be done
+          after the current state is finished. It is represented by a program
+          with a hole (), where the value returned from the current state is to
+          be inserted. It can also contain unevaluated terms, which are wrapped
+          by a pair of square brackets []. For example:
+        </p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">``s``s`ks()[i]</code></pre>
+        <p>
+          This continuation means that: after the current value resolves (for
+          example to <code class="bg-lightest-blue br2 ph1">k</code>), evaluate
+          <code class="bg-lightest-blue br2 ph1">i</code> (the continuation will
+          be <code class="bg-lightest-blue br2 ph2">``s``s`ksk()</code> when
+          this happens), plug it back in, and return it (<code
+            class="bg-lightest-blue br2 ph2"
+            >``s``s`kski</code
+          >) as the result.
+        </p>
+        <p>
+          Every computation has a continuation, the stepper just makes it
+          explicit.
+        </p>
+        <p>Okay, so here are the four states of this machine:</p>
+        <ul>
+          <li>
+            <strong class="bg-dark-green light-yellow ph1">Eval(Term)</strong>
+            evaluates a term and returns its value.
+          </li>
+          <li>
+            <strong class="bg-dark-green light-yellow ph1"
+              >ApplyT(Value, Term)</strong
+            >
+            applies a value to a term and returns the result. (Spoiler: we need
+            this step because of the
+            <code class="bg-lightest-blue br2 ph1">d</code> operator)
+          </li>
+          <li>
+            <strong class="bg-dark-green light-yellow ph1"
+              >ApplyV(Value, Walue)</strong
+            >
+            applies a value to a walue
+            <span class="f6">(I know, I'm bad at naming)</span> and returns the
+            result.
+          </li>
+          <li>
+            <strong class="bg-dark-green light-yellow ph1"
+              >ApplyK(Value)</strong
+            >
+            stuffs a value in the current continuation, and decides which
+            term/value to evaluate next.
+          </li>
+        </ul>
+        <p>
+          To list out the transformation rules is as tedious as writing the code
+          for the machine itself, so for exactly how these states transform
+          between each other, just go read the source code. (I may describe how
+          I arrived at this machine in another article.)
+        </p>
+        <p>
+          Luckily you don't need to understand this to understand Unlambda. The
+          meaning of a program can be derived using rewrite rules, and the
+          machine is just a way to execute the program. But stepping does make
+          debugging a bit easier.
+        </p>
+      </section>
+      <section>
+        <h2>Surely you can't write anything meaningful with this...</h2>
+        <p>
+          Now back to the language. Is a language without variables pointless
+          (point-free, ha)? Definitely not. We can always program in another
+          imaginary language and compile that program to Unlambda.
+        </p>
+        <p>
+          It turns out that
+          <strong>combinatory logic is Turing complete</strong>, in the sense
+          that every lambda expression can be translated into combinatory logic
+          expressions using simple rules.
+        </p>
+        <p>
+          The central idea is recursion. Suppose you have a lambda term
+          <code class="bg-lightest-blue br2 ph1">\x.(body)</code>. If (body)
+          does not contain the variable x, you can easily see that this is
+          equivalent to <code class="bg-lightest-blue br2 ph1">`k(body)</code>.
+          If (body) is the variable x, then it is equivalent to
+          <code class="bg-lightest-blue br2 ph1">\x.x = i</code>. If both of
+          these conditions don't hold, then this term must be of the form
+          <code class="bg-lightest-blue br2 ph1"
+            >\x.(`ab) = ``s(\x.a)(\x.b)</code
+          >.
+        </p>
+        <p>
+          For example, the function
+          <code class="bg-lightest-blue br2 ph1">\x.`kx</code> can be
+          transformed as follows:
+        </p>
+        <pre><code class="bg-lightest-blue br2 ph2">\x.`kx
+=> ``s(\x.k)(\x.x)
+=> ``s`kki</code></pre>
+        <p>
+          It is nothing short of a miracle that this works! Though it is
+          definitely inefficient, for we could have written
+          <code class="bg-lightest-blue br2 ph1">k</code> directly. This also
+          leads to an interesting observation: for every term, turning it into
+          <code class="bg-lightest-blue br2 ph1">\x.`(term)x</code> and then
+          expanding it will give you another term with the same meaning, but
+          longer. Exponentially longer (for the number of expansions), in fact!
+        </p>
+        <p>
+          And now with the power of the lambda calculus at our disposal, we can
+          go wild! Represent integers! Booleans! Lists! Recursions! The
+          possibilities are (quite literally) endless. See wikipedia
+          <a href="https://en.wikipedia.org/wiki/Church_encoding"
+            >Church encoding</a
+          >
+          for more ideas.
+        </p>
+      </section>
+      <section>
+        <h2>
+          Wait you only talked about
+          <code class="bg-lightest-blue br2 ph1">`ski</code>, what about the
+          others?
+        </h2>
+        <p>
+          Let's go over
+          <code class="bg-lightest-blue br2 ph1">dcv</code> quickly. Starting
+          with the easiest:
+          <code class="bg-lightest-blue br2 ph1">v</code> consumes every value
+          applied to it,
+        </p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2">`vx = v</code></pre>
+        <p>
+          Remember the <strong>Continuation</strong> (<strong>Kont</strong>
+          for short)?
+          <span class="bg-yellow">The remaining computation</span>? You may have
+          noticed that a continuation looks a bit like a function: it has
+          <strong>a hole</strong> where you can plug in a value, just like a
+          lambda expression with one variable. Well guess what, you can make a
+          function out of it!
+          <code class="bg-lightest-blue br2 ph1">c</code> stands for call/cc in
+          scheme, a function that takes a lambda expression and calls it with
+          the current continuation ("reified" as / polymorphed into a function)
+          passed to it, hence the name. Passing a value to the current
+          continuation will restore the remaining computation to that
+          continuation, but with this value as the current value. Basically
+          <strong>time travel</strong>.
+        </p>
+        <pre
+          class="tc"
+        ><code class="bg-lightest-blue br2 ph2 tc">`cx[K] = `xK[K]</code> and
+<code class="bg-lightest-blue br2 ph2 tc">`Kx[K'] = x[K]</code></pre>
+        <p>
+          <code class="bg-lightest-blue br2 ph1">c</code> is notorious hard to
+          understand and even harder to use, which is why this playground added
+          a helpful Kont panel to show you what the continuation is at any point
+          in time. For some serious usage of
+          <code class="bg-lightest-blue br2 ph1">c</code> / brain-melting fun,
+          see <span class="courier">count2.unl</span>.
+        </p>
+        <p>
+          We mentioned Unlambda being a Strict language, where every value is
+          evaluated before being passed to another function. This means that
+          <code class="bg-lightest-blue br2 ph1">`k`ri</code> will print a
+          newline before returning
+          <code class="bg-lightest-blue br2 ph1">`kr</code>. But a special form
+          (read: not a function but used like one to maximize confusion)
+          <code class="bg-lightest-blue br2 ph1">d</code> can be used to suspend
+          evaluation of a value, resuming it when the compound expression is
+          applied again. For example,
+          <code class="bg-lightest-blue br2 ph1">`d`ri</code> will not print
+          anything, and return the value
+          <code class="bg-lightest-blue br2 ph1">`d`ri</code>, where
+          <code class="bg-lightest-blue br2 ph1">`ri</code> is untouched. Only
+          by calling this value again, say
+          <code class="bg-lightest-blue br2 ph1">``d`rik</code>, will a newline
+          be printed and a value returned, in this case
+          <code class="bg-lightest-blue br2 ph1">k &lt;= `rk &lt;= ``rik</code>.
+        </p>
+      </section>
+      <hr />
+      <p>
+        And with that, our guide is complete. Go nuts! Oh, and here is
+        <a href="/">a link back to the main page</a>.
+      </p>
+      <div class="mb5 tr">
+        -- Peter Huang, 2024, accidentally
+        <a href="https://github.com/RebelPotato/UnABS">Code & Stuff</a>
+      </div>
+    </article>
+    <footer>
+      <p>Stuff not in the guide article?</p>
+    </footer>
+  </body>
+</html>
