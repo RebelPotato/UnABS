@@ -10,25 +10,73 @@
     />
   </head>
   <body>
-    <article class="mh4 mt3">
+    <article class="mh4 mt3 georgia">
       <header>
         <h1 class="f-headline mv0">UnABS</h1>
         <h2 class="f2 mv1">Unlambda At Breakneck Speed</h2>
       </header>
-      <main class="f4 lh-copy">
+      <main class="f4 lh-copy measure">
         <p>
           A fast abstract machine interpreter for
           <a href="http://www.madore.org/~david/programs/unlambda/">unlambda</a
           >, the original obfuscated & functional language.
         </p>
         <ul>
-          <li><a href="./playground/">Playground</a></li>
-          <li></li>
-          <li>Deriving the abstract machine <span class="f6">(coming soon)</span></li>
+          <li><a href="./playground/">UnABS Playground</a></li>
+          <li><a href="./guide">A Guide to Unlambda</a></li>
+          <li>
+            Deriving the abstract machine <span class="f6">(coming soon)</span>
+          </li>
         </ul>
+        <section class="bl bw2 pl3 b--light-green f5">
+          <h2 class="f3 mv2">Abstract machines</h2>
+          <p>
+            Abstract machines are powerful ways of executing programs. An
+            abstract machine consists of:
+          </p>
+          <ul>
+            <li>a function to transform a program into a "state"</li>
+            <li>
+              a function turning one state to another (or get stuck on an end
+              state)
+            </li>
+            <li>
+              and another function to extract a return value from an end state
+            </li>
+          </ul>
+          <p>
+            Executing a program is straight-forward. Transform the program into
+            an initial state, step through the states until we cannot go any
+            further, and extract the return value from the final state.
+          </p>
+          <p class="f4">
+            Having an abstract machine for a language gives you the ability to
+            execute step by step, essential for understanding a crazy language
+            with
+            <code>call/cc</code> and stuff.
+          </p>
+        </section>
+        <section class="bl bw2 pl3 b--light-red">
+          <h2 class="f3 mv2">Rationale</h2>
+          <p class="f5 mv2">
+            I learnt how to make an abstract machine out of an interpreter from
+            <a href="https://dl.acm.org/doi/10.1145/888251.888254"
+              >this paper</a
+            >
+            and want to try it out. Unlambda seemed like an easy target.
+          </p>
+          <p>
+            Ultimately, I am now the proud owner of a unlambda interpreter,
+            which matters more than anything else.
+          </p>
+        </section>
       </main>
       <footer>
-        <p>Rebelpotato, 2024</p>
+        <hr />
+        <p class="tr">
+          Rebelpotato, 2024,
+          <a href="https://github.com/RebelPotato/UnABS">Source</a>
+        </p>
       </footer>
     </article>
   </body>
