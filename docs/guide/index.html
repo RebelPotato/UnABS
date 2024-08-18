@@ -9,8 +9,13 @@
       href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css"
     />
   </head>
-  <body class="athelas mt3-ns mh4-ns mt0 mh1 bg-washed-green" x-data="playground">
-    <article class="w-70-l w-80-m w-100 bg-white overflow-y-auto ph3 f5 lh-copy">
+  <body
+    class="athelas mt3-ns mh4-ns mt0 mh1 bg-washed-green"
+    x-data="playground"
+  >
+    <article
+      class="w-70-l w-80-m w-100 bg-white overflow-y-auto ph3 f5 lh-copy"
+    >
       <!-- Guide sent from /guide/index.html -->
       <h1 class="lh-title f-headline-l f1">
         <span class="bg-yellow">A Guide to Unlambda</span><br />
@@ -141,7 +146,7 @@
         </p>
         <ul>
           <li>a way to transform a program into a "state"</li>
-          <li>and a function turning one state to another</li>
+          <li>and a function turning one state into another</li>
         </ul>
         <p>
           Executing a program is then just a matter of transforming the program,
@@ -150,14 +155,16 @@
         </p>
         <p>
           For this machine, each state has a clear meaning. There are four kinds
-          of states in total, but every one of them has a
-          <strong>Continuation</strong> (<strong>Kont</strong> for short). This
-          value represents
+          of states in total, and every one of them has one or many "thing"s
+          (terms or values) and a <strong>Continuation</strong> (<strong
+            >Kont</strong
+          >
+          for short). This value represents
           <span class="bg-yellow">the remaining computation</span> to be done
-          after the current state is finished. It is represented by a program
-          with a hole (), where the value returned from the current state is to
-          be inserted. It can also contain unevaluated terms, which are wrapped
-          by a pair of square brackets []. For example:
+          after evaluating the current "thing"s to a value. It is represented by
+          a program with a hole (), where the value returned from the current
+          state is to be inserted. It can also contain unevaluated terms, which
+          are wrapped by a pair of square brackets []. For example:
         </p>
         <pre
           class="tc"
@@ -202,21 +209,21 @@
             <strong class="bg-dark-green light-yellow ph1"
               >ApplyK(Value)</strong
             >
-            stuffs a value in the current continuation, and decides which
-            term/value to evaluate next.
+            stuffs a value into the current continuation, and decides what to
+            evaluate next.
           </li>
         </ul>
         <p>
-          To list out the transformation rules is as tedious as writing the code
+          Listing out the transformation rules is as tedious as writing the code
           for the machine itself, so for exactly how these states transform
-          between each other, just go read the source code. (I may describe how
-          I arrived at this machine in another article.)
+          between each other, just go read the source code. (I may describe them
+          in more detail the "deriving the abstract machine" article.)
         </p>
         <p>
           Luckily you don't need to understand this to understand Unlambda. The
-          meaning of a program can be derived using rewrite rules, and the
-          machine is just a way to execute the program. But stepping does make
-          debugging a bit easier.
+          meaning of a program can be understood by rewrite rules, and the
+          machine is just a way of executing the program. But understanding the
+          machine does make debugging a bit easier.
         </p>
       </section>
       <section>
@@ -235,26 +242,26 @@
         <p>
           The central idea is recursion. Suppose you have a lambda term
           <code class="bg-lightest-blue br2 ph1">\x.(body)</code>. If (body)
-          does not contain the variable x, you can easily see that this is
-          equivalent to <code class="bg-lightest-blue br2 ph1">`k(body)</code>.
-          If (body) is the variable x, then it is equivalent to
-          <code class="bg-lightest-blue br2 ph1">\x.x = i</code>. If both of
-          these conditions don't hold, then this term must be of the form
-          <code class="bg-lightest-blue br2 ph1"
-            >\x.(`ab) = ``s(\x.a)(\x.b)</code
-          >.
+          does not contain the variable x, this is trivially equivalent to
+          <code class="bg-lightest-blue br2 ph1">`k(body)</code>. If (body) is
+          the variable x, then it is equivalent to
+          <code class="bg-lightest-blue br2 ph1">\x.x = i</code>. If neither of
+          these conditions hold, then this term must be of the form
+          <code class="bg-lightest-blue br2 ph1">\x.(`ab)</code>, which we can
+          then transform into
+          <code class="bg-lightest-blue br2 ph1">``s(\x.a)(\x.b)</code>.
         </p>
         <p>
           For example, the function
           <code class="bg-lightest-blue br2 ph1">\x.`kx</code> can be
-          transformed as follows:
+          transformed in this way:
         </p>
         <pre><code class="bg-lightest-blue br2 ph2">\x.`kx
 => ``s(\x.k)(\x.x)
 => ``s`kki</code></pre>
         <p>
-          It is nothing short of a miracle that this works! Though it is
-          definitely inefficient, for we could have written
+          It is nothing short of a miracle that this works! Definitely
+          inefficient though, for we could have written
           <code class="bg-lightest-blue br2 ph1">k</code> directly. This also
           leads to an interesting observation: for every term, turning it into
           <code class="bg-lightest-blue br2 ph1">\x.`(term)x</code> and then
@@ -264,7 +271,7 @@
         <p>
           And now with the power of the lambda calculus at our disposal, we can
           go wild! Represent integers! Booleans! Lists! Recursions! The
-          possibilities are (quite literally) endless. See wikipedia
+          possibilities are (quite literally) boundless. See wikipedia
           <a href="https://en.wikipedia.org/wiki/Church_encoding"
             >Church encoding</a
           >
