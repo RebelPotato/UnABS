@@ -32,6 +32,9 @@
         let text = await response.text();
         programs[name] = text;
       }
+      if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+        window.location.href = "/guide/";
+      }
     </script>
     <style>
       .blink {
